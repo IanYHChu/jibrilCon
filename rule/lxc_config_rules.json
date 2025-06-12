@@ -1,0 +1,154 @@
+{
+  "rules": [
+    {
+      "id": "missing_uidmap",
+      "type": "alert",
+      "description": "Missing unprivileged UID map (uidmap not set)",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "uidmap",
+          "operator": "not_exists"
+        }
+      ]
+    },
+    {
+      "id": "missing_gidmap",
+      "type": "alert",
+      "description": "Missing unprivileged GID map (gidmap not set)",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "gidmap",
+          "operator": "not_exists"
+        }
+      ]
+    },
+    {
+      "id": "uidmap_format_invalid",
+      "type": "alert",
+      "description": "UID map format invalid (should be '0 <non-zero> <non-zero>')",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "uidmap",
+          "operator": "regex_match",
+          "value": "^0\\s+[1-9][0-9]*\\s+[1-9][0-9]*$"
+        }
+      ]
+    },
+    {
+      "id": "gidmap_format_invalid",
+      "type": "alert",
+      "description": "GID map format invalid (should be '0 <non-zero> <non-zero>')",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "gidmap",
+          "operator": "regex_match",
+          "value": "^0\\s+[1-9][0-9]*\\s+[1-9][0-9]*$"
+        }
+      ]
+    },
+    {
+      "id": "cap_drop_missing",
+      "type": "warning",
+      "description": "No capabilities are dropped (lxc.cap.drop not set)",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cap_drop",
+          "operator": "not_exists"
+        }
+      ]
+    },
+    {
+      "id": "mount_proc_dangerous",
+      "type": "alert",
+      "description": "Mounting /proc is dangerous",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "source",
+          "operator": "equals",
+          "value": "/proc"
+        }
+      ]
+    },
+    {
+      "id": "mount_sys_dangerous",
+      "type": "alert",
+      "description": "Mounting /sys is dangerous",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "source",
+          "operator": "equals",
+          "value": "/sys"
+        }
+      ]
+    },
+    {
+      "id": "mount_run_dangerous",
+      "type": "alert",
+      "description": "Mounting /run is dangerous",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "source",
+          "operator": "equals",
+          "value": "/run"
+        }
+      ]
+    },
+    {
+      "id": "mount_usr_should_be_ro",
+      "type": "warning",
+      "description": "Mounting /usr should be readonly",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "source",
+          "operator": "equals",
+          "value": "/usr"
+        },
+        {
+          "field": "options",
+          "operator": "not_contains",
+          "value": "ro"
+        }
+      ]
+    },
+    {
+      "id": "mount_dev_should_be_ro",
+      "type": "warning",
+      "description": "Mounting /dev (or subpaths) should be readonly",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "source",
+          "operator": "regex_match",
+          "value": "^/dev"
+        },
+        {
+          "field": "options",
+          "operator": "not_contains",
+          "value": "ro"
+        }
+      ]
+    },
+    {
+      "id": "runs_as_root",
+      "type": "alert",
+      "description": "LXC container is running as root",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "runs_as_root",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    }    
+  ]
+}

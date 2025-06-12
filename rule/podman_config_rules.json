@@ -1,0 +1,56 @@
+{
+    "rules": [
+      {
+        "id": "runs_as_root",
+        "type": "alert",
+        "description": "Container runs as root (UID 0)",
+        "logic": "and",
+        "conditions": [
+          {
+            "field": "process.user.uid",
+            "operator": "equals",
+            "value": 0
+          }
+        ]
+      },
+      {
+        "id": "has_cap_sys_admin",
+        "type": "alert",
+        "description": "Bounding set includes CAP_SYS_ADMIN (privileged)",
+        "logic": "and",
+        "conditions": [
+          {
+            "field": "process.capabilities.bounding",
+            "operator": "contains",
+            "value": "CAP_SYS_ADMIN"
+          }
+        ]
+      },
+      {
+        "id": "binds_not_readonly",
+        "type": "warning",
+        "description": "Bind mounts exist that are not readonly",
+        "logic": "and",
+        "conditions": [
+          {
+            "field": "binds_not_readonly",
+            "operator": "equals",
+            "value": true
+          }
+        ]
+      },
+      {
+        "id": "missing_seccomp",
+        "type": "warning",
+        "description": "Seccomp profile is not defined",
+        "logic": "and",
+        "conditions": [
+          {
+            "field": "seccomp",
+            "operator": "not_exists"
+          }
+        ]
+      }
+    ]
+  }
+  

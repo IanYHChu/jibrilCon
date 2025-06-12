@@ -1,0 +1,56 @@
+{
+  "rules": [
+    {
+      "id": "privileged",
+      "type": "warning",
+      "description": "Container is running in privileged mode",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "privileged",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "runs_as_root",
+      "type": "alert",
+      "description": "Container is running as root or launched by a systemd service without User",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "service_user_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "readonly_rootfs_missing",
+      "type": "warning",
+      "description": "Readonly root filesystem is not enabled",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "readonly_rootfs",
+          "operator": "equals",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "binds_not_readonly",
+      "type": "warning",
+      "description": "At least one bind mount is not readonly",
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "binds_not_readonly",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    }
+  ]
+}

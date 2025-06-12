@@ -1,0 +1,42 @@
+{
+  "unit_dirs": [
+    "/etc/systemd/system",
+    "/usr/lib/systemd/system",
+    "/lib/systemd/system"
+  ],
+  "exec_keys": [
+    "ExecStart",
+    "ExecStartPre"
+  ],
+  "container_keywords": [
+    "docker",
+    "podman",
+    "lxc-start"
+  ],
+  "engine_detection": {
+    "docker": {
+      "keyword": "docker",
+      "container_regex": "--name\\s+([^\\s]+)"
+    },
+    "podman": {
+      "keyword": "podman",
+      "container_regex": "--name\\s+([^\\s]+)"
+    },
+    "lxc": {
+      "keyword": "lxc-start",
+      "container_regex": "-n\\s+([^\\s]+)"
+    }
+  },
+  "fields_to_keep": [
+    "ExecStart",
+    "ExecStartPre",
+    "ExecStop",
+    "User",
+    "CapabilityBoundingSet",
+    "AmbientCapabilities"
+  ],
+  "extraction_patterns": {
+    "CapabilityBoundingSet": "CapabilityBoundingSet=(.*)",
+    "AmbientCapabilities": "AmbientCapabilities=(.*)"
+  }
+}
