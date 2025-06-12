@@ -1,0 +1,6 @@
+/*.sh
+/sample
+/*.zip
+**/__pycache__/
+**/*.bak
+**/*~
