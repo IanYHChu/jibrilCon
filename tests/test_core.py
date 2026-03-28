@@ -77,12 +77,15 @@ def test_run_scan_collect_systemd_containers_error(make_rootfs):
     """If collect_systemd_containers raises OSError, scan still proceeds."""
     r = make_rootfs
 
-    with patch(
-        "jibrilcon.core.detect_init_system",
-        return_value="systemd",
-    ), patch(
-        "jibrilcon.core.collect_systemd_containers",
-        side_effect=OSError("permission denied reading unit files"),
+    with (
+        patch(
+            "jibrilcon.core.detect_init_system",
+            return_value="systemd",
+        ),
+        patch(
+            "jibrilcon.core.collect_systemd_containers",
+            side_effect=OSError("permission denied reading unit files"),
+        ),
     ):
         report = run_scan(r.path)
 

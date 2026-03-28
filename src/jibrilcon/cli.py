@@ -184,10 +184,7 @@ exit codes:
                 "verify that the rootfs is fully mounted."
             )
         elif exc.errno == errno.ENOSPC:
-            hint = (
-                "\nHint: no space left on device; free disk space "
-                "and retry."
-            )
+            hint = "\nHint: no space left on device; free disk space and retry."
         print(f"Error: I/O failure during scan: {exc}{hint}", file=sys.stderr)
         sys.exit(1)
 

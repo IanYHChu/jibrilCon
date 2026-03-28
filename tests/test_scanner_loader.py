@@ -213,7 +213,9 @@ def test_package_import_failure_does_not_crash(mock_import, caplog):
 
     assert results == []
 
-    import_errors = [r for r in caplog.records if "Failed to import scanner package" in r.message]
+    import_errors = [
+        r for r in caplog.records if "Failed to import scanner package" in r.message
+    ]
     assert len(import_errors) == 1
 
 
@@ -246,15 +248,25 @@ def test_individual_module_import_failure_does_not_crash(caplog):
 
     # Apply iter_modules patch first, then import_module, so that the
     # patch() machinery itself does not route through our mock.
-    with patch("jibrilcon.util.scanner_loader.pkgutil.iter_modules", return_value=fake_modules), \
-         patch("jibrilcon.util.scanner_loader.importlib.import_module", side_effect=import_side_effect):
+    with (
+        patch(
+            "jibrilcon.util.scanner_loader.pkgutil.iter_modules",
+            return_value=fake_modules,
+        ),
+        patch(
+            "jibrilcon.util.scanner_loader.importlib.import_module",
+            side_effect=import_side_effect,
+        ),
+    ):
         modules = _iter_scanner_modules()
 
     # Only the working module should be returned
     assert len(modules) == 1
     assert modules[0].__name__ == "jibrilcon.scanners.working"
 
-    import_errors = [r for r in caplog.records if "Failed to import scanner module" in r.message]
+    import_errors = [
+        r for r in caplog.records if "Failed to import scanner module" in r.message
+    ]
     assert len(import_errors) == 1
     assert "broken" in import_errors[0].message
 
@@ -275,9 +287,7 @@ def test_scanner_timeout_handled_gracefully(mock_iter, caplog):
         _make_scanner_module("jibrilcon.scanners.fast", fast_scan),
     ]
 
-    results = run_scanners(
-        "/fake/rootfs", context=ScanContext(), scanner_timeout=0.5
-    )
+    results = run_scanners("/fake/rootfs", context=ScanContext(), scanner_timeout=0.5)
 
     # The fast scanner should still produce its result
     assert len(results) == 1

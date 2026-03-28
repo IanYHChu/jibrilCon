@@ -67,9 +67,7 @@ def run_scan(
     try:
         init_sys = detect_init_system(mount_path)
     except (RuntimeError, OSError, ValueError) as exc:
-        logger.warning(
-            "Failed to detect init system, continuing without it: %s", exc
-        )
+        logger.warning("Failed to detect init system, continuing without it: %s", exc)
         init_sys = ""
 
     logger.info("Detected init system: %s", init_sys or "<unknown>")
@@ -81,8 +79,7 @@ def run_scan(
             )
         except (RuntimeError, OSError, ValueError) as exc:
             logger.warning(
-                "Failed to collect systemd container data, "
-                "continuing without it: %s",
+                "Failed to collect systemd container data, continuing without it: %s",
                 exc,
             )
 
