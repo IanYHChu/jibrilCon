@@ -121,9 +121,31 @@ _OPERATOR_MAP: Dict[str, Callable[[Any, Any], bool]] = {
 # ---------------------------------------------------------------------
 
 
+_MAX_REGEX_LEN = 1024
+_NESTED_QUANTIFIER_RE = re.compile(
+    r"(\([^)]*[+*][^)]*\))[+*]"
+    r"|"
+    r"([+*]\??\))[+*]"
+)
+
+
+def _validate_regex(pattern: str) -> None:
+    """Raise ValueError if *pattern* looks dangerous or too long."""
+    if len(pattern) > _MAX_REGEX_LEN:
+        raise ValueError(
+            f"Regex pattern exceeds {_MAX_REGEX_LEN} characters"
+        )
+    if _NESTED_QUANTIFIER_RE.search(pattern):
+        raise ValueError(
+            f"Regex pattern contains nested quantifiers (potential ReDoS): "
+            f"{pattern!r}"
+        )
+
+
 @lru_cache(maxsize=256)
 def _compile_regex(pattern: str) -> re.Pattern:
-    """Compile *pattern* and cache the result."""
+    """Validate and compile *pattern*, caching the result."""
+    _validate_regex(pattern)
     return re.compile(pattern)
 
 
@@ -141,7 +163,7 @@ def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
 
     try:
         return func(actual, expected)
-    except (TypeError, AttributeError, ValueError, KeyError) as exc:
+    except (TypeError, AttributeError, ValueError, KeyError, re.error) as exc:
         logger.error("Condition evaluation error: %s", exc, exc_info=True)
         return False
 

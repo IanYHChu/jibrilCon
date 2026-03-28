@@ -2,7 +2,17 @@
 
 import copy
 
-from jibrilcon.util.rules_engine import evaluate_rules
+import pytest
+
+from jibrilcon.util.rules_engine import _compile_regex, evaluate_rules
+
+
+@pytest.fixture(autouse=True)
+def _clear_regex_cache():
+    """Clear the regex LRU cache between tests."""
+    _compile_regex.cache_clear()
+    yield
+    _compile_regex.cache_clear()
 
 
 # ------------------------------------------------------------------ #
@@ -263,3 +273,36 @@ def _rule(operator: str, field: str = "x", value=None):
         "logic": "and",
         "conditions": [{"field": field, "operator": operator, "value": value}],
     }
+
+
+# ------------------------------------------------------------------ #
+# Regex DoS protection
+# ------------------------------------------------------------------ #
+
+
+def test_nested_quantifier_rejected():
+    """Regex with nested quantifiers should not match (graceful failure)."""
+    rules = [_rule("regex_match", "x", r"(a+)+b")]
+    result = evaluate_rules({"x": "aaaaaab"}, rules)
+    assert result == []
+
+
+def test_overly_long_regex_rejected():
+    """Regex exceeding max length should not match (graceful failure)."""
+    rules = [_rule("regex_match", "x", "a" * 2000)]
+    result = evaluate_rules({"x": "a"}, rules)
+    assert result == []
+
+
+def test_valid_regex_still_works():
+    """Normal regex patterns must still function correctly."""
+    rules = [_rule("regex_match", "x", r"^root$")]
+    assert len(evaluate_rules({"x": "root"}, rules)) == 1
+    assert len(evaluate_rules({"x": "nonroot"}, rules)) == 0
+
+
+def test_invalid_regex_syntax_handled():
+    """Malformed regex (bad syntax) should not crash."""
+    rules = [_rule("regex_match", "x", r"[invalid")]
+    result = evaluate_rules({"x": "test"}, rules)
+    assert result == []
