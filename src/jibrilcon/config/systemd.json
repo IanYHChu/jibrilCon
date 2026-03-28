@@ -11,7 +11,10 @@
   "container_keywords": [
     "docker",
     "podman",
-    "lxc-start"
+    "lxc-start",
+    "kubelet",
+    "k3s",
+    "rke2"
   ],
   "engine_detection": {
     "docker": {
@@ -25,6 +28,18 @@
     "lxc": {
       "keyword": "lxc-start",
       "container_regex": "-n\\s+([^\\s]+)"
+    },
+    "kubernetes": {
+      "keyword": "kubelet",
+      "container_regex": "--hostname-override[=\\s]+([^\\s]+)"
+    },
+    "k3s": {
+      "keyword": "k3s",
+      "container_regex": "k3s\\s+(server|agent)"
+    },
+    "rke2": {
+      "keyword": "rke2",
+      "container_regex": "rke2\\s+(server|agent)"
     }
   },
   "fields_to_keep": [

@@ -1,0 +1,65 @@
+{
+  "manifest_dirs": {
+    "kubeadm": [
+      "/etc/kubernetes/manifests"
+    ],
+    "k3s": [
+      "/var/lib/rancher/k3s/server/manifests",
+      "/var/lib/rancher/k3s/agent/pod-manifests"
+    ],
+    "rke2": [
+      "/var/lib/rancher/rke2/server/manifests",
+      "/var/lib/rancher/rke2/agent/pod-manifests"
+    ]
+  },
+  "detection_hints": {
+    "kubeadm": [
+      "/etc/kubernetes/manifests",
+      "/etc/kubernetes/admin.conf"
+    ],
+    "k3s": [
+      "/etc/rancher/k3s",
+      "/var/lib/rancher/k3s"
+    ],
+    "rke2": [
+      "/etc/rancher/rke2",
+      "/var/lib/rancher/rke2"
+    ]
+  },
+  "manifest_extensions": [".yaml", ".yml", ".json"],
+  "pod_spec_paths": {
+    "Pod": ["spec"],
+    "Deployment": ["spec", "template", "spec"],
+    "DaemonSet": ["spec", "template", "spec"],
+    "StatefulSet": ["spec", "template", "spec"],
+    "ReplicaSet": ["spec", "template", "spec"],
+    "ReplicationController": ["spec", "template", "spec"],
+    "Job": ["spec", "template", "spec"],
+    "CronJob": ["spec", "jobTemplate", "spec", "template", "spec"]
+  },
+  "dangerous_hostpaths": [
+    "/",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/etc",
+    "/root",
+    "/home",
+    "/var/run/docker.sock",
+    "/run/containerd/containerd.sock",
+    "/var/run/crio/crio.sock",
+    "/var/lib/kubelet",
+    "/var/lib/etcd",
+    "/etc/kubernetes"
+  ],
+  "dangerous_capabilities": [
+    "SYS_ADMIN",
+    "SYS_PTRACE",
+    "SYS_MODULE",
+    "NET_RAW",
+    "NET_ADMIN",
+    "SYS_RAWIO",
+    "DAC_OVERRIDE",
+    "DAC_READ_SEARCH"
+  ]
+}

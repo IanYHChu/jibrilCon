@@ -1,0 +1,109 @@
+{
+  "rules": [
+    {
+      "id": "psa_enforce_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Namespace does not have Pod Security Admission enforce label",
+      "risk": "Without a pod-security.kubernetes.io/enforce label, the namespace has no admission-level restrictions on pod security. Any pod spec, including privileged containers, will be admitted.",
+      "remediation": "Add label pod-security.kubernetes.io/enforce=restricted (or baseline as minimum) to the namespace.",
+      "references": {
+        "mitre_attack": ["T1610"],
+        "cis_kubernetes_benchmark": ["5.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "psa_enforce_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "psa_enforce_privileged",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Namespace PSA enforce level is set to privileged",
+      "risk": "The privileged Pod Security Standard allows all pod configurations including privileged containers, host namespaces, and host path mounts. This effectively disables all pod admission security checks.",
+      "remediation": "Change pod-security.kubernetes.io/enforce to baseline or restricted.",
+      "references": {
+        "mitre_attack": ["T1610"],
+        "cis_kubernetes_benchmark": ["5.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "psa_enforce_privileged",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "secret_plaintext_in_manifest",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Secret object contains plaintext data in manifest file",
+      "risk": "Kubernetes Secret data is base64-encoded, not encrypted. Secrets stored in manifest files on disk are trivially decodable by anyone with filesystem access. This exposes credentials, tokens, and keys.",
+      "remediation": "Use SealedSecrets, ExternalSecrets, or a secrets management solution (Vault, AWS Secrets Manager). Do not store Secret manifests with data on disk.",
+      "references": {
+        "mitre_attack": ["T1552.001"],
+        "cis_kubernetes_benchmark": ["5.4.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "secret_plaintext_in_manifest",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "netpol_ingress_allow_all",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "NetworkPolicy has an allow-all ingress rule",
+      "risk": "An empty ingress rule ({}) matches all sources, effectively allowing all inbound traffic. This renders the NetworkPolicy a no-op for ingress filtering.",
+      "remediation": "Specify explicit ingress rules with podSelector, namespaceSelector, or ipBlock restrictions.",
+      "references": {
+        "mitre_attack": ["T1046"],
+        "cis_kubernetes_benchmark": ["5.3.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "netpol_ingress_allow_all",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "netpol_egress_allow_all",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "NetworkPolicy has an allow-all egress rule",
+      "risk": "An empty egress rule ({}) matches all destinations, allowing the pod to communicate with any endpoint including cloud metadata services, external C2 servers, and internal services like etcd.",
+      "remediation": "Specify explicit egress rules. At minimum, block access to cloud metadata (169.254.169.254) and internal control plane endpoints.",
+      "references": {
+        "mitre_attack": ["T1048"],
+        "cis_kubernetes_benchmark": ["5.3.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "netpol_egress_allow_all",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    }
+  ]
+}

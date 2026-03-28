@@ -1,0 +1,193 @@
+{
+  "rules": [
+    {
+      "id": "rbac_wildcard_verbs",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Role/ClusterRole uses wildcard (*) in verbs",
+      "risk": "Wildcard verbs grant all operations (get, list, create, delete, exec, etc.) on the specified resources, making it impossible to enforce least-privilege and enabling broad abuse if the role is compromised.",
+      "remediation": "Replace wildcard verbs with only the specific verbs required by the workload.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["5.1.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_wildcard_verbs",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_wildcard_resources",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Role/ClusterRole uses wildcard (*) in resources",
+      "risk": "Wildcard resources grant access to all resource types in the specified API group, including secrets, pods, nodes, and service accounts. A compromised identity can read credentials, deploy workloads, or escalate privileges.",
+      "remediation": "Replace wildcard resources with only the specific resource types required.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["5.1.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_wildcard_resources",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_pods_exec",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Role/ClusterRole grants pods/exec access",
+      "risk": "pods/exec allows executing arbitrary commands inside any pod the role can target. This is equivalent to shell access and can be used for credential theft, lateral movement, and data exfiltration.",
+      "remediation": "Remove pods/exec from the role unless strictly required for debugging. Consider using ephemeral containers instead.",
+      "references": {
+        "mitre_attack": ["T1609"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_pods_exec",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_secrets_access",
+      "type": "alert",
+      "severity": 8.5,
+      "description": "Role/ClusterRole grants get/list/watch on secrets",
+      "risk": "Access to secrets allows reading all credentials, tokens, TLS keys, and API keys stored in the namespace or cluster. This is a high-value target for attackers.",
+      "remediation": "Restrict secret access to only the specific secrets needed. Avoid granting list or watch on all secrets.",
+      "references": {
+        "mitre_attack": ["T1552"],
+        "cis_kubernetes_benchmark": ["5.1.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_secrets_access",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_escalate_bind",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Role/ClusterRole grants escalate or bind verb on roles",
+      "risk": "The escalate verb allows granting permissions the subject does not have. The bind verb allows binding roles to subjects without those permissions. Both are direct privilege escalation paths.",
+      "remediation": "Remove escalate and bind verbs. These should only be held by cluster administrators.",
+      "references": {
+        "mitre_attack": ["T1548"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_escalate_bind",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_create_pods",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "Role/ClusterRole grants create on pods",
+      "risk": "The ability to create pods allows deploying privileged containers, mounting host paths, and effectively escaping to the host. This is a common privilege escalation technique in Kubernetes.",
+      "remediation": "Restrict pod creation to dedicated deployment service accounts. Regular users should deploy through Deployments or other controllers with admission policies.",
+      "references": {
+        "mitre_attack": ["T1610"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_create_pods",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_nodes_proxy",
+      "type": "alert",
+      "severity": 8.5,
+      "description": "Role/ClusterRole grants access to nodes/proxy",
+      "risk": "nodes/proxy allows proxying requests to the kubelet API on any node, which provides exec and attach access to any pod on that node, bypassing RBAC on pods.",
+      "remediation": "Remove nodes/proxy access. This should only be held by cluster-level monitoring or debugging tools.",
+      "references": {
+        "mitre_attack": ["T1609"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_nodes_proxy",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_sa_token_create",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Role/ClusterRole grants create on serviceaccounts/token",
+      "risk": "Creating service account tokens allows impersonating any service account the role can target, inheriting all of that SA's RBAC permissions.",
+      "remediation": "Remove serviceaccounts/token create permission. Use projected service account tokens or bound tokens instead.",
+      "references": {
+        "mitre_attack": ["T1528"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_sa_token_create",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "clusterrole_binds_default_sa",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "ClusterRoleBinding/RoleBinding grants permissions to a default service account",
+      "risk": "The default service account is automatically used by pods that do not specify a serviceAccountName. Granting it permissions effectively grants those permissions to any unintentional pod in the namespace.",
+      "remediation": "Create dedicated service accounts for workloads. Do not grant roles to the default service account.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["5.1.5"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "binds_default_sa",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    }
+  ]
+}
