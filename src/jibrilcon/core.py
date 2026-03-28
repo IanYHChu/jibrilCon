@@ -46,6 +46,7 @@ def run_scan(
     *,
     filters_path: Optional[Path] = None,
     max_workers: int = 8,
+    scanner_timeout: float = 300.0,
 ) -> Dict[str, object]:
     """
     Execute all scanners against *mount_path* and return the final report.
@@ -58,6 +59,8 @@ def run_scan(
         Optional override for ``config/systemd.json``.
     max_workers
         ThreadPool size (I/O-bound scanners benefit from modest parallelism).
+    scanner_timeout
+        Per-scanner timeout in seconds (default 300).
     """
     mount_path = Path(mount_path)
     context = ScanContext()
@@ -89,7 +92,10 @@ def run_scan(
 
     # 2. Run scanners (thread-parallel) via util.scanner_loader
     results: List[Dict[str, object]] = run_scanners(
-        str(mount_path), context=context, max_workers=max_workers
+        str(mount_path),
+        context=context,
+        max_workers=max_workers,
+        scanner_timeout=scanner_timeout,
     )
 
     # 3. Build final report (filtering to blocks that contain the "scanner" key)

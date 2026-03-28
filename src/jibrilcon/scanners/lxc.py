@@ -79,7 +79,13 @@ _FIELD_TO_CONFIG_KEY = {
 
 @lru_cache(maxsize=8192)
 def _is_text_file(path: str) -> bool:
-    """Return True if *path* is a small UTF-8 text file."""
+    """
+    Return True if *path* is a small UTF-8 text file.
+
+    Thread-safety note: no lock needed.  This function is only called
+    from _file_contains_rootfs -> _get_lxc_rootfs_config_candidates ->
+    scan(), all within the single LXC scanner thread.
+    """
     try:
         if os.path.getsize(path) > MAX_FILE_SIZE:
             return False
@@ -208,9 +214,12 @@ def _parse_lxc_config(path: Path) -> Dict[str, List[str]]:
 @lru_cache(maxsize=4096)
 def _find_systemd_exec_lines(rootfs: str, cname: str) -> List[str]:
     """
-    Fallback helper – call the central systemd parser so we respect the
+    Fallback helper -- call the central systemd parser so we respect the
     JSON-configured `unit_dirs` and `exec_keys`.  Filters rows to the LXC
     container *cname* and flattens all Exec* command lines.
+
+    Thread-safety note: no lock needed.  This function is only called
+    from scan() within the single LXC scanner thread.
     """
     rows = scan_systemd_container_units(rootfs)
     lines: List[str] = []

@@ -18,7 +18,8 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List
@@ -35,6 +36,8 @@ _SCANNER_PKG = "jibrilcon.scanners"
 _SCAN_FUNC = "scan"
 # Default pool size when caller does not specify.
 _MAX_WORKERS = 8
+# Default per-scanner timeout in seconds (5 minutes).
+_SCANNER_TIMEOUT: float = 300.0
 
 # ---------------------------------------------------------------------
 # Internal helpers
@@ -71,6 +74,7 @@ def run_scanners(
     *,
     context: ScanContext | None = None,
     max_workers: int = _MAX_WORKERS,
+    scanner_timeout: float = _SCANNER_TIMEOUT,
 ) -> List[Dict[str, Any]]:
     """
     Locate every scanner's scan() and execute them in a ThreadPool.
@@ -81,6 +85,13 @@ def run_scanners(
         Mounted Linux rootfs path.
     context : ScanContext | None
         Shared object for cross-scanner coordination.
+    max_workers : int
+        Maximum number of concurrent scanner threads.
+    scanner_timeout : float
+        Per-scanner timeout in seconds.  When a scanner exceeds this
+        limit a :class:`concurrent.futures.TimeoutError` is caught,
+        an error is logged, and processing continues with remaining
+        scanners.
 
     Returns
     -------
@@ -102,21 +113,43 @@ def run_scanners(
         future_map = {
             exe.submit(fn, mount_path, context=context): name for name, fn in scanners
         }
-        for fut in as_completed(future_map):
-            name = future_map[fut]
-            try:
-                res = fut.result()
-                if isinstance(res, dict):
-                    results.append(res)
-                else:
-                    logger.warning("Scanner %s returned non-dict result", name)
-            except (RuntimeError, OSError) as exc:
-                logger.error("Scanner %s raised: %s", name, exc)
-            except (TypeError, ValueError) as exc:
-                logger.exception(
-                    "Scanner %s raised %s -- this is likely a bug in the scanner",
-                    name,
-                    type(exc).__name__,
-                )
+        deadline = _time.monotonic() + scanner_timeout
+        pending = set(future_map)
+
+        while pending:
+            remaining = max(0.0, deadline - _time.monotonic())
+            done, pending = wait(
+                pending, timeout=remaining, return_when=FIRST_COMPLETED
+            )
+
+            # If wait() returned with no completed futures, every
+            # remaining future has exceeded the deadline.
+            if not done:
+                for fut in pending:
+                    name = future_map[fut]
+                    logger.error(
+                        "Scanner %s timed out after %.0f seconds",
+                        name,
+                        scanner_timeout,
+                    )
+                    fut.cancel()
+                break
+
+            for fut in done:
+                name = future_map[fut]
+                try:
+                    res = fut.result(timeout=0)
+                    if isinstance(res, dict):
+                        results.append(res)
+                    else:
+                        logger.warning("Scanner %s returned non-dict result", name)
+                except (RuntimeError, OSError) as exc:
+                    logger.error("Scanner %s raised: %s", name, exc)
+                except (TypeError, ValueError) as exc:
+                    logger.exception(
+                        "Scanner %s raised %s -- this is likely a bug in the scanner",
+                        name,
+                        type(exc).__name__,
+                    )
 
     return results

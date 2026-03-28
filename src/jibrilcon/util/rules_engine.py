@@ -28,7 +28,8 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from functools import lru_cache
+import threading
+from functools import lru_cache, wraps
 from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -139,9 +140,42 @@ def _validate_regex(pattern: str) -> None:
         )
 
 
-@lru_cache(maxsize=256)
+def _threadsafe_lru_cache(maxsize: int = 128):
+    """
+    Decorator combining @lru_cache with a threading.Lock.
+
+    Python's @lru_cache is not fully thread-safe on cache misses before
+    Python 3.12.  Since all scanners call evaluate_rules from parallel
+    threads, we guard cache access with a lock.
+
+    The wrapper exposes cache_info() and cache_clear() for compatibility
+    with existing test fixtures.
+    """
+
+    def decorator(fn):
+        cached = lru_cache(maxsize=maxsize)(fn)
+        lock = threading.Lock()
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            with lock:
+                return cached(*args, **kwargs)
+
+        wrapper.cache_clear = cached.cache_clear
+        wrapper.cache_info = cached.cache_info
+        return wrapper
+
+    return decorator
+
+
+@_threadsafe_lru_cache(maxsize=256)
 def _compile_regex(pattern: str) -> re.Pattern:
-    """Validate and compile *pattern*, caching the result."""
+    """
+    Validate and compile *pattern*, caching the result.
+
+    Thread-safe: all scanners invoke evaluate_rules -> _regex_match ->
+    _compile_regex concurrently from the ThreadPoolExecutor.
+    """
     _validate_regex(pattern)
     return re.compile(pattern)
 

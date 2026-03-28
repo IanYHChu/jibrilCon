@@ -40,6 +40,8 @@ jobs:
         run: ruff check src/ tests/
       - name: Ruff format check
         run: ruff format --check src/ tests/
+      - name: Mypy type check
+        run: mypy src/jibrilcon/
 
   security:
     runs-on: ubuntu-latest

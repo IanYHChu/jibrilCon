@@ -46,6 +46,8 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
 ]
 
 [tool.pytest.ini_options]
@@ -64,6 +66,32 @@ exclude_lines = [
 
 [tool.bandit]
 exclude_dirs = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+show_error_codes = true
+
+# Per-module overrides for files with existing type errors.
+# These should be tightened over time as the codebase gains type annotations.
+[[tool.mypy.overrides]]
+module = [
+    "jibrilcon.util.rules_engine",
+    "jibrilcon.util.scanner_loader",
+    "jibrilcon.util.path_utils",
+    "jibrilcon.init_manager_finder",
+    "jibrilcon.scanners.lxc",
+    "jibrilcon.scanners.podman",
+    "jibrilcon.cli",
+]
+disable_error_code = ["arg-type", "call-arg", "dict-item", "attr-defined"]
 
 [tool.ruff]
 target-version = "py310"

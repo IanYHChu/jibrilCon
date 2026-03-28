@@ -40,7 +40,7 @@ def test_run_scan_drops_malformed_results(make_rootfs):
     """Scanner results missing the 'scanner' key are filtered out."""
     r = make_rootfs
 
-    def fake_scanners(mount_path, context, max_workers):
+    def fake_scanners(mount_path, **kwargs):
         return [
             {"scanner": "docker", "summary": {"alerts": 0}, "results": []},
             {"bad": "no scanner key"},
