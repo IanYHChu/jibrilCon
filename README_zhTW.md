@@ -38,6 +38,9 @@ pip install -e ".[dev]"
 ## 使用方式
 
 ```bash
+# 查詢版本
+python3 -m jibrilcon --version
+
 # 基本掃描,帶彩色終端輸出
 python3 -m jibrilcon /mnt/target-rootfs
 
@@ -60,6 +63,47 @@ python3 -m jibrilcon /mnt/target-rootfs --max-workers 4
 
 ## 報告格式
 
+### 頂層結構
+
+```json
+{
+  "report": [
+    {
+      "scanner": "docker | podman | lxc",
+      "summary": {
+        "alerts": 3,
+        "warnings": 1
+      },
+      "results": [
+        {
+          "container": "my-app",
+          "status": "violated | clean",
+          "violations": [ "..." ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "alerts": 5,
+    "warnings": 2,
+    "clean": 1,
+    "violated": 3,
+    "scanners_run": ["docker", "podman", "lxc"]
+  }
+}
+```
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `report` | array | 各掃描器的結果區塊 |
+| `report[].scanner` | string | 掃描器模組名稱 |
+| `report[].summary` | object | 該掃描器的 alert/warning 計數 |
+| `report[].results` | array | 逐容器項目,含 `status` ("clean" 或 "violated") |
+| `summary` | object | 所有掃描器的彙總計數 |
+| `summary.scanners_run` | array | 已執行的掃描器名稱 |
+
+### 違規項目
+
 每項違規都包含可操作的上下文資訊與安全框架對應:
 
 ```json
@@ -79,6 +123,29 @@ python3 -m jibrilcon /mnt/target-rootfs --max-workers 4
   "lines": ["HostConfig.Privileged = True"]
 }
 ```
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `id` | string | 規則識別碼 |
+| `type` | string | `"alert"` 或 `"warning"` |
+| `severity` | float | 風險分數 1.0 (低) 至 10.0 (嚴重),依循 CVSS v3 定性量表 |
+| `description` | string | 可讀的發現摘要 |
+| `risk` | string | 此組態為何危險 |
+| `remediation` | string | 建議修復方式 |
+| `references` | object | 安全框架對應 (MITRE ATT&CK、CIS、NIST) |
+| `source` | string | 相對於掛載點的組態檔路徑 |
+| `lines` | array | 觸發規則的具體組態項目 |
+
+### 嚴重度量表
+
+嚴重度遵循 [CVSS v3 定性評級](https://www.first.org/cvss/specification-document):
+
+| 分數 | 等級 | 範例 |
+| --- | --- | --- |
+| 9.0 -- 10.0 | 嚴重 (Critical) | 特權模式、完全主機存取 |
+| 7.0 -- 8.9 | 高 (High) | 缺少 capability 限縮、未啟用 user namespace |
+| 4.0 -- 6.9 | 中 (Medium) | 可寫入的 bind mount、PID mode 共享 |
+| 0.1 -- 3.9 | 低 (Low) | 資訊性發現 |
 
 ### 對應的安全框架
 
@@ -175,6 +242,17 @@ python3 -m pytest tests/ -v
 # 程式碼檢查
 ruff check src/ tests/
 ```
+
+---
+
+## Exit Codes
+
+| 代碼 | 意義 |
+| --- | --- |
+| 0 | 掃描成功完成 (不論是否有違規) |
+| 1 | 執行期錯誤 (例如權限不足、組態損毀) |
+| 2 | 參數錯誤 (無效旗標、缺少掛載路徑) |
+| 130 | 使用者中斷 (Ctrl+C / SIGINT) |
 
 ---
 

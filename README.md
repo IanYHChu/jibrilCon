@@ -51,6 +51,9 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
+# Check version
+python3 -m jibrilcon --version
+
 # Basic scan with colored console output
 python3 -m jibrilcon /mnt/target-rootfs
 
@@ -74,6 +77,47 @@ If `--output` is not specified, the report is printed to stdout. Use
 
 ## Report Format
 
+### Top-level Structure
+
+```json
+{
+  "report": [
+    {
+      "scanner": "docker | podman | lxc",
+      "summary": {
+        "alerts": 3,
+        "warnings": 1
+      },
+      "results": [
+        {
+          "container": "my-app",
+          "status": "violated | clean",
+          "violations": [ "..." ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "alerts": 5,
+    "warnings": 2,
+    "clean": 1,
+    "violated": 3,
+    "scanners_run": ["docker", "podman", "lxc"]
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `report` | array | Per-scanner result blocks |
+| `report[].scanner` | string | Scanner module name |
+| `report[].summary` | object | Per-scanner alert/warning counts |
+| `report[].results` | array | Per-container entries with `status` ("clean" or "violated") |
+| `summary` | object | Aggregated counts across all scanners |
+| `summary.scanners_run` | array | Names of scanners that executed |
+
+### Violation Entry
+
 Each violation includes actionable context and framework references:
 
 ```json
@@ -93,6 +137,29 @@ Each violation includes actionable context and framework references:
   "lines": ["HostConfig.Privileged = True"]
 }
 ```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Rule identifier |
+| `type` | string | `"alert"` or `"warning"` |
+| `severity` | float | Risk score from 1.0 (low) to 10.0 (critical), following CVSS v3 qualitative scale |
+| `description` | string | Human-readable summary of the finding |
+| `risk` | string | Why this configuration is dangerous |
+| `remediation` | string | Recommended fix |
+| `references` | object | Framework mapping (MITRE ATT&CK, CIS, NIST) |
+| `source` | string | Config file path relative to mount point |
+| `lines` | array | Specific config entries that triggered the rule |
+
+### Severity Scale
+
+Severity follows the [CVSS v3 qualitative rating](https://www.first.org/cvss/specification-document):
+
+| Score | Rating | Example |
+| --- | --- | --- |
+| 9.0 -- 10.0 | Critical | Privileged mode, full host access |
+| 7.0 -- 8.9 | High | Missing capability drops, user namespace disabled |
+| 4.0 -- 6.9 | Medium | Writable bind mounts, PID mode sharing |
+| 0.1 -- 3.9 | Low | Informational findings |
 
 ### Mapped Frameworks
 
@@ -189,6 +256,17 @@ python3 -m pytest tests/ -v
 # Lint
 ruff check src/ tests/
 ```
+
+---
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Scan completed successfully (violations may or may not be present) |
+| 1 | Runtime error (e.g., permission denied, corrupted config) |
+| 2 | Argument error (invalid flag, missing mount path) |
+| 130 | Interrupted by user (Ctrl+C / SIGINT) |
 
 ---
 
