@@ -30,6 +30,7 @@ from jibrilcon.util.logging_utils import init_logging
 import sys
 from typing import Dict
 
+from jibrilcon import __version__
 from jibrilcon.core import run_scan
 from jibrilcon.util.report_writer import write_report  # handles .json or .json.gz
 
@@ -70,6 +71,11 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     parser.add_argument(
         "mount_path",
         help="Path where the filesystem image is mounted read-only",
@@ -129,7 +135,7 @@ def main() -> None:
         if "summary" in report:
             _print_summary(report["summary"], use_color=not args.no_color)
     except KeyboardInterrupt:
-        sys.exit("Interrupted by user")
+        sys.exit(130)
     except (RuntimeError, OSError) as exc:
         logger.error("Scan failed: %s", exc, exc_info=True)
         print(f"Error: {exc}", file=sys.stderr)
@@ -144,4 +150,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        sys.exit("Interrupted by user")
+        sys.exit(130)
