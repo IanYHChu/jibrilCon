@@ -54,7 +54,7 @@ _DEFINE_RE = re.compile(
     r"(?:^|\s)(?:-s|--define)\s+(?:'(?P<kvq1>[^']+)'|\"(?P<kvq2>[^\"]+)\"|(?P<kvq3>\S+))"
 )
 
-_EXCLUDE_DIRS = {"/dev", "/proc", "/run", "/sys", "/tmp", "/mnt", "/media"}
+_EXCLUDE_DIRS = {"/dev", "/proc", "/run", "/sys", "/tmp", "/mnt", "/media"}  # nosec B108
 
 MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB safeguard
 
