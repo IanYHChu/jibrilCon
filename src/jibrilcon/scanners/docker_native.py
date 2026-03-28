@@ -22,6 +22,7 @@ The module exposes:
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import re
@@ -33,6 +34,8 @@ from jibrilcon.util.config_loader import load_json_config
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
 # Constants
@@ -101,7 +104,11 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
 
         (container_name, config_path, hostconfig_path)
     """
-    roots = [str(safe_join(rootfs, _get_docker_data_root(rootfs).lstrip("/")))]
+    try:
+        roots = [str(safe_join(rootfs, _get_docker_data_root(rootfs).lstrip("/")))]
+    except ValueError as exc:
+        logger.warning("Skipping Docker data-root: %s", exc)
+        roots = []
     roots += _get_user_docker_roots(rootfs)
 
     discovered: List[Tuple[str, str, str]] = []
@@ -128,6 +135,8 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
     sec_opts = host.get("SecurityOpt") or []
     binds = host.get("Binds") or []
 
+    # label=disable disables all MAC enforcement (SELinux/AppArmor),
+    # which Docker sets automatically in --privileged mode.
     privileged_raw = host.get("Privileged", False) or ("label=disable" in sec_opts)
     privileged = _to_bool(privileged_raw)
 
@@ -185,12 +194,16 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                 break
 
         if override_cfg_dir:
-            conf_json_path = safe_join(
-                mount_path,
-                override_cfg_dir.lstrip("/"),
-                "config.json",
-            )
-            if os.path.exists(conf_json_path):
+            try:
+                conf_json_path = safe_join(
+                    mount_path,
+                    override_cfg_dir.lstrip("/"),
+                    "config.json",
+                )
+            except ValueError as exc:
+                logger.warning("Skipping Docker config override: %s", exc)
+                conf_json_path = None
+            if conf_json_path and os.path.exists(conf_json_path):
                 override_cfg = load_json_or_empty(conf_json_path)
                 if override_cfg:
                     # merge into main config
@@ -220,6 +233,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                     v["lines"].append(f"{cfg_key} = {val}")
                 else:
                     v["lines"].append(f"<missing> {cfg_key}")
+            v.pop("conditions", None)
+            v.pop("logic", None)
             vios.append(v)
 
         status = "violated" if vios else "clean"

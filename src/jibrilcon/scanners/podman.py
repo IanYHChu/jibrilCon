@@ -23,6 +23,7 @@ The module exposes:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -34,6 +35,8 @@ from jibrilcon.util.config_loader import load_json_config
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
+
+logger = logging.getLogger(__name__)
 
 try:
     import tomllib as toml  # type: ignore
@@ -56,6 +59,7 @@ _FIELD_TO_CONFIG_KEY = {
     "has_cap_sys_admin": "process.capabilities.bounding",
     "binds_not_readonly": "mounts",
     "seccomp": "linux.seccompDefault",
+    "service_user_missing": "service_user_missing",
 }
 
 # ---------------------------------------------------------------------
@@ -98,7 +102,11 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
     """
     Return list of *(container_name, config_path)* tuples.
     """
-    roots = [str(safe_join(rootfs, _get_podman_data_root(rootfs).lstrip("/")))]
+    try:
+        roots = [str(safe_join(rootfs, _get_podman_data_root(rootfs).lstrip("/")))]
+    except ValueError as exc:
+        logger.warning("Skipping Podman data-root: %s", exc)
+        roots = []
     roots += _get_user_podman_roots(rootfs)
 
     discovered: List[Tuple[str, str]] = []
@@ -173,12 +181,16 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
             m_cfg = _CONFIG_RE.search(line)
             if m_cfg:
                 conf_dir = m_cfg.group("confdir")
-                conf_json_path = safe_join(
-                    mount_path,
-                    conf_dir.lstrip("/"),
-                    "config.json",
-                )
-                if os.path.exists(conf_json_path):
+                try:
+                    conf_json_path = safe_join(
+                        mount_path,
+                        conf_dir.lstrip("/"),
+                        "config.json",
+                    )
+                except ValueError as exc:
+                    logger.warning("Skipping Podman config override: %s", exc)
+                    conf_json_path = None
+                if conf_json_path and os.path.exists(conf_json_path):
                     override_cfg = load_json_or_empty(conf_json_path)
                     if override_cfg:
                         deep_merge(cfg_json, override_cfg)
@@ -187,16 +199,19 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
             m_mod = _MODULE_RE.search(line)
             if m_mod:
                 mod_arg = m_mod.group("modfile")
-                # Decide absolute path
-                if "/" in mod_arg:
-                    mod_path = safe_join(mount_path, mod_arg.lstrip("/"))
-                else:
-                    mod_path = safe_join(
-                        mount_path,
-                        "etc/podman/modules",
-                        f"{mod_arg}.toml",
-                    )
-                if os.path.exists(mod_path):
+                try:
+                    if "/" in mod_arg:
+                        mod_path = safe_join(mount_path, mod_arg.lstrip("/"))
+                    else:
+                        mod_path = safe_join(
+                            mount_path,
+                            "etc/podman/modules",
+                            f"{mod_arg}.toml",
+                        )
+                except ValueError as exc:
+                    logger.warning("Skipping Podman module override: %s", exc)
+                    mod_path = None
+                if mod_path and os.path.exists(mod_path):
                     try:
                         with open(mod_path, "rb") as fp:
                             mod_data = toml.load(fp)
@@ -208,8 +223,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         
         data = _extract_fields(cfg_json)
 
-        # merge systemd inference: if service lacks non-root User=
-        data["process.user.uid"] = 0 if context.is_user_missing(name) else data["process.user.uid"]
+        # merge systemd inference: flag if service lacks non-root User=
+        data["service_user_missing"] = context.is_user_missing(name)
 
         vios_raw = evaluate_rules(data, rules)
         vios = []
@@ -226,6 +241,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                     v["lines"].append(f"{cfg_key} = {val}")
                 else:
                     v["lines"].append(f"<missing> {cfg_key}")
+            v.pop("conditions", None)
+            v.pop("logic", None)
             vios.append(v)
 
         status = "violated" if vios else "clean"

@@ -45,6 +45,8 @@ class ScanContext:
         self._user_missing: Set[str] = set()
         # key: (engine, container) -> list of Exec* command lines
         self._exec_lines: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+        # init system detected in rootfs (set by core.run_scan)
+        self.init_system: str | None = None
 
     # -----------------------------------------------------------------
     # Mutators

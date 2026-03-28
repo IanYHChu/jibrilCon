@@ -2,8 +2,16 @@
   "rules": [
     {
       "id": "privileged",
-      "type": "warning",
+      "type": "alert",
+      "severity": 9.0,
       "description": "Container is running in privileged mode",
+      "risk": "Grants full access to all host devices and disables most kernel isolation. An attacker inside the container can trivially escape to the host.",
+      "remediation": "Remove --privileged flag. Use --cap-add to grant only the specific capabilities required.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.4"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -16,7 +24,15 @@
     {
       "id": "runs_as_root",
       "type": "alert",
-      "description": "Container is running as root or launched by a systemd service without User",
+      "severity": 6.0,
+      "description": "Container launched by a systemd service without a non-root User directive",
+      "risk": "The container daemon process runs as UID 0 on the host. Combined with a container escape, this yields immediate root access to the host.",
+      "remediation": "Add 'User=<non-root>' to the systemd service unit file that starts the Docker daemon or container.",
+      "references": {
+        "mitre_attack": ["T1078.003"],
+        "cis_docker_benchmark": ["5.3"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -29,7 +45,15 @@
     {
       "id": "readonly_rootfs_missing",
       "type": "warning",
+      "severity": 4.0,
       "description": "Readonly root filesystem is not enabled",
+      "risk": "An attacker who gains code execution inside the container can write to the root filesystem, enabling persistence or binary replacement.",
+      "remediation": "Add --read-only flag when starting the container. Use tmpfs or volume mounts for writable paths.",
+      "references": {
+        "mitre_attack": ["T1565.001"],
+        "cis_docker_benchmark": ["5.12"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -42,7 +66,15 @@
     {
       "id": "binds_not_readonly",
       "type": "warning",
+      "severity": 5.0,
       "description": "At least one bind mount is not readonly",
+      "risk": "Writable bind mounts allow the container to modify host files. An attacker can tamper with host binaries, cron jobs, or configuration files.",
+      "remediation": "Append ':ro' to bind mount specifications (e.g., -v /host/path:/container/path:ro) unless write access is strictly required.",
+      "references": {
+        "mitre_attack": ["T1565.001"],
+        "cis_docker_benchmark": ["5.12"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {

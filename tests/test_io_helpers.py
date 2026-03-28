@@ -69,3 +69,9 @@ def test_load_json_or_empty_invalid_json(tmp_path):
     f = tmp_path / "bad.json"
     f.write_text("{bad json")
     assert load_json_or_empty(str(f)) == {}
+
+
+def test_load_json_or_empty_unicode_error(tmp_path):
+    f = tmp_path / "binary.json"
+    f.write_bytes(b"\x80\x81\x82\xff invalid bytes")
+    assert load_json_or_empty(str(f)) == {}

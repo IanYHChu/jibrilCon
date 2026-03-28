@@ -41,3 +41,14 @@ def test_multiple_engines():
     assert ctx.is_systemd_started("docker", "app")
     assert ctx.is_systemd_started("podman", "db")
     assert not ctx.is_systemd_started("docker", "db")
+
+
+def test_init_system_default_none():
+    ctx = ScanContext()
+    assert ctx.init_system is None
+
+
+def test_init_system_settable():
+    ctx = ScanContext()
+    ctx.init_system = "systemd"
+    assert ctx.init_system == "systemd"

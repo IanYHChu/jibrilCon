@@ -195,6 +195,28 @@ def test_operator_not_in():
     assert len(evaluate_rules({"x": 2}, rules)) == 0
 
 
+def test_operator_not_regex_match():
+    rules = [_rule("not_regex_match", "x", r"^valid$")]
+    assert len(evaluate_rules({"x": "invalid"}, rules)) == 1
+    assert len(evaluate_rules({"x": "valid"}, rules)) == 0
+
+
+def test_operator_not_regex_match_none_field():
+    rules = [_rule("not_regex_match", "x", r"^valid$")]
+    assert len(evaluate_rules({}, rules)) == 0
+
+
+def test_empty_conditions_always_false():
+    rule_and = {
+        "id": "empty_and", "type": "alert", "logic": "and", "conditions": [],
+    }
+    rule_or = {
+        "id": "empty_or", "type": "alert", "logic": "or", "conditions": [],
+    }
+    assert evaluate_rules({"x": 1}, [rule_and]) == []
+    assert evaluate_rules({"x": 1}, [rule_or]) == []
+
+
 # ------------------------------------------------------------------ #
 # Helper
 # ------------------------------------------------------------------ #

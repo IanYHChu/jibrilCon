@@ -1,57 +1,130 @@
 {
-    "rules": [
-      {
-        "id": "runs_as_root",
-        "type": "alert",
-        "description": "Container runs as root (UID 0)",
-        "logic": "and",
-        "conditions": [
-          {
-            "field": "process.user.uid",
-            "operator": "equals",
-            "value": 0
-          }
-        ]
+  "rules": [
+    {
+      "id": "runs_as_root",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Container runs as root (UID 0)",
+      "risk": "Processes inside the container execute as UID 0. If the container shares the host user namespace, a breakout grants immediate host root access.",
+      "remediation": "Set a non-root user in the OCI runtime spec (process.user.uid) or use --user flag at container creation.",
+      "references": {
+        "mitre_attack": ["T1078.003"],
+        "cis_docker_benchmark": ["5.3"],
+        "nist_800_190": ["4.4"]
       },
-      {
-        "id": "has_cap_sys_admin",
-        "type": "alert",
-        "description": "Bounding set includes CAP_SYS_ADMIN (privileged)",
-        "logic": "and",
-        "conditions": [
-          {
-            "field": "has_cap_sys_admin",
-            "operator": "equals",
-            "value": true
-          }
-        ]
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "process.user.uid",
+          "operator": "equals",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "has_cap_sys_admin",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Bounding set includes CAP_SYS_ADMIN (privileged)",
+      "risk": "CAP_SYS_ADMIN enables mount, namespace, and cgroup operations that can bypass container isolation. Effectively equivalent to privileged mode.",
+      "remediation": "Remove CAP_SYS_ADMIN from the capability bounding set. Use fine-grained capabilities instead.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.3"],
+        "nist_800_190": ["4.4"]
       },
-      {
-        "id": "binds_not_readonly",
-        "type": "warning",
-        "description": "Bind mounts exist that are not readonly",
-        "logic": "and",
-        "conditions": [
-          {
-            "field": "binds_not_readonly",
-            "operator": "equals",
-            "value": true
-          }
-        ]
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_cap_sys_admin",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "binds_not_readonly",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Bind mounts exist that are not readonly",
+      "risk": "Writable bind mounts allow the container to modify host files. An attacker can tamper with host binaries, cron jobs, or configuration files.",
+      "remediation": "Add 'ro' to mount options for all bind mounts that do not require write access.",
+      "references": {
+        "mitre_attack": ["T1565.001"],
+        "cis_docker_benchmark": ["5.12"],
+        "nist_800_190": ["4.4"]
       },
-      {
-        "id": "missing_seccomp",
-        "type": "warning",
-        "description": "Seccomp profile is not defined",
-        "logic": "and",
-        "conditions": [
-          {
-            "field": "seccomp",
-            "operator": "equals",
-            "value": false
-          }
-        ]
-      }
-    ]
-  }
-  
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "binds_not_readonly",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "missing_seccomp",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Seccomp profile is not defined",
+      "risk": "Without a seccomp profile, the container can invoke any system call. Dangerous syscalls (e.g., mount, ptrace, reboot) remain available to attackers.",
+      "remediation": "Apply a seccomp profile via --security-opt seccomp=<profile.json> or set seccompProfilePath in the OCI runtime spec.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.21"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "seccomp",
+          "operator": "equals",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "service_user_missing",
+      "type": "alert",
+      "severity": 6.0,
+      "description": "Systemd service unit does not set a non-root User directive",
+      "risk": "The container engine process runs as UID 0 on the host. Combined with a container escape, this yields immediate root access to the host.",
+      "remediation": "Add 'User=<non-root>' to the [Service] section of the systemd unit file.",
+      "references": {
+        "mitre_attack": ["T1078.003"],
+        "cis_docker_benchmark": ["5.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "service_user_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "readonly_rootfs_missing",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "Readonly root filesystem is not enabled",
+      "risk": "An attacker who gains code execution inside the container can write to the root filesystem, enabling persistence or binary replacement.",
+      "remediation": "Set root.readonly to true in the OCI runtime spec or use --read-only flag.",
+      "references": {
+        "mitre_attack": ["T1565.001"],
+        "cis_docker_benchmark": ["5.12"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "readonly_rootfs",
+          "operator": "equals",
+          "value": false
+        }
+      ]
+    }
+  ]
+}

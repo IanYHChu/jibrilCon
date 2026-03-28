@@ -67,6 +67,12 @@ def _regex_match(a: Any, pattern: str) -> bool:
     return bool(_compile_regex(pattern).search(str(a)))
 
 
+def _not_regex_match(a: Any, pattern: str) -> bool:
+    if a is None:
+        return False
+    return not bool(_compile_regex(pattern).search(str(a)))
+
+
 def _gt(a: Any, b: Any) -> bool:
     return a > b
 
@@ -99,6 +105,7 @@ _OPERATOR_MAP: Dict[str, Callable[[Any, Any], bool]] = {
     "exists": _exists,
     "not_exists": _not_exists,
     "regex_match": _regex_match,
+    "not_regex_match": _not_regex_match,
     "gt": _gt,
     "gte": _gte,
     "lt": _lt,
@@ -138,6 +145,8 @@ def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
     """Evaluate all conditions in *rule* according to its logic."""
     logic = str(rule.get("logic", "and")).lower()
     conditions = rule.get("conditions", [])
+    if not conditions:
+        return False
     results = [_match_condition(data, c) for c in conditions]
 
     if logic == "or":

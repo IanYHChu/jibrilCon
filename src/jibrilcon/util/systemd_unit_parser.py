@@ -197,9 +197,13 @@ def collect_systemd_containers(
             ctx.mark_user_missing(cname)
 
         # --- cache Exec* lines for later reuse ------------------------
-        exec_lines = row.get("raw_lines", {}).get("execstart", [])
-        if exec_lines:
-            ctx.add_exec_lines(engine, cname, exec_lines)
+        raw = row.get("raw_lines", {})
+        all_exec: List[str] = []
+        for key, lines in raw.items():
+            if key.startswith("execstart"):
+                all_exec.extend(lines)
+        if all_exec:
+            ctx.add_exec_lines(engine, cname, all_exec)
         
         # Development-time information
         logger.info(

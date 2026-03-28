@@ -3,7 +3,14 @@
     {
       "id": "missing_uidmap",
       "type": "alert",
+      "severity": 8.0,
       "description": "Missing unprivileged UID map (uidmap not set)",
+      "risk": "Without a UID map, the container runs in the host user namespace. UID 0 inside the container is UID 0 on the host, enabling direct host compromise on escape.",
+      "remediation": "Add 'lxc.idmap = u 0 <host_start> <range>' to the LXC config to enable user namespace isolation.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -15,7 +22,14 @@
     {
       "id": "missing_gidmap",
       "type": "alert",
+      "severity": 8.0,
       "description": "Missing unprivileged GID map (gidmap not set)",
+      "risk": "Without a GID map, the container shares the host group namespace. Group-based file permissions on the host become exploitable from within the container.",
+      "remediation": "Add 'lxc.idmap = g 0 <host_start> <range>' to the LXC config to enable group namespace isolation.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -27,12 +41,19 @@
     {
       "id": "uidmap_format_invalid",
       "type": "alert",
+      "severity": 8.0,
       "description": "UID map format invalid (should be '0 <non-zero> <non-zero>')",
+      "risk": "A malformed UID map may silently disable user namespace isolation, making the container effectively privileged.",
+      "remediation": "Correct the lxc.idmap line to format: 'u 0 <host_uid_start> <range>' where host_uid_start and range are non-zero integers.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
           "field": "uidmap",
-          "operator": "regex_match",
+          "operator": "not_regex_match",
           "value": "^0\\s+[1-9][0-9]*\\s+[1-9][0-9]*$"
         }
       ]
@@ -40,12 +61,19 @@
     {
       "id": "gidmap_format_invalid",
       "type": "alert",
+      "severity": 8.0,
       "description": "GID map format invalid (should be '0 <non-zero> <non-zero>')",
+      "risk": "A malformed GID map may silently disable group namespace isolation, making host group permissions exploitable.",
+      "remediation": "Correct the lxc.idmap line to format: 'g 0 <host_gid_start> <range>' where host_gid_start and range are non-zero integers.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
           "field": "gidmap",
-          "operator": "regex_match",
+          "operator": "not_regex_match",
           "value": "^0\\s+[1-9][0-9]*\\s+[1-9][0-9]*$"
         }
       ]
@@ -53,7 +81,14 @@
     {
       "id": "cap_drop_missing",
       "type": "warning",
+      "severity": 5.0,
       "description": "No capabilities are dropped (lxc.cap.drop not set)",
+      "risk": "The container retains all default Linux capabilities. Capabilities such as CAP_NET_RAW, CAP_SYS_PTRACE increase the attack surface.",
+      "remediation": "Add 'lxc.cap.drop = <capability_list>' to drop unnecessary capabilities. Consider dropping all and adding back only required ones.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -65,7 +100,14 @@
     {
       "id": "mount_proc_dangerous",
       "type": "alert",
+      "severity": 8.0,
       "description": "Mounting /proc is dangerous",
+      "risk": "Host /proc exposes process information, kernel parameters, and memory maps. Attackers can read credentials from /proc/*/environ or manipulate kernel tunables.",
+      "remediation": "Remove the lxc.mount.entry for /proc. If required, use lxc.mount.auto with restricted proc (e.g., proc:mixed).",
+      "references": {
+        "mitre_attack": ["T1611", "T1003"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -78,7 +120,14 @@
     {
       "id": "mount_sys_dangerous",
       "type": "alert",
+      "severity": 8.0,
       "description": "Mounting /sys is dangerous",
+      "risk": "Host /sys provides writable access to kernel subsystems (cgroups, devices, network). Attackers can reconfigure cgroups to escape the container.",
+      "remediation": "Remove the lxc.mount.entry for /sys. If required, mount as read-only (add 'ro' to options).",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -91,7 +140,14 @@
     {
       "id": "mount_run_dangerous",
       "type": "alert",
+      "severity": 7.0,
       "description": "Mounting /run is dangerous",
+      "risk": "Host /run contains runtime state including D-Bus sockets, systemd control sockets, and container engine sockets. Access enables privilege escalation and lateral movement.",
+      "remediation": "Remove the lxc.mount.entry for /run. Provide only specific sockets or paths if needed.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -104,7 +160,14 @@
     {
       "id": "mount_usr_should_be_ro",
       "type": "warning",
+      "severity": 4.0,
       "description": "Mounting /usr should be readonly",
+      "risk": "A writable /usr mount allows the container to replace host system binaries, enabling backdoor installation or supply-chain attacks.",
+      "remediation": "Add 'ro' to the mount options for the /usr mount entry.",
+      "references": {
+        "mitre_attack": ["T1565.001"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -122,13 +185,20 @@
     {
       "id": "mount_dev_should_be_ro",
       "type": "warning",
+      "severity": 7.0,
       "description": "Mounting /dev (or subpaths) should be readonly",
+      "risk": "Writable access to host /dev allows direct device manipulation. Attackers can read raw disk, write to block devices, or create device nodes for escape.",
+      "remediation": "Add 'ro' to the mount options for /dev mount entries. Prefer bind-mounting only specific devices needed.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
           "field": "source",
           "operator": "regex_match",
-          "value": "^/dev"
+          "value": "^/dev(/|$)"
         },
         {
           "field": "options",
@@ -140,7 +210,14 @@
     {
       "id": "runs_as_root",
       "type": "alert",
+      "severity": 7.0,
       "description": "LXC container is running as root",
+      "risk": "The container process runs as UID 0 in the host namespace. Any container escape grants immediate host root access.",
+      "remediation": "Configure unprivileged UID/GID maps (lxc.idmap) and ensure the systemd service starts with a non-root User directive.",
+      "references": {
+        "mitre_attack": ["T1078.003"],
+        "nist_800_190": ["4.4"]
+      },
       "logic": "and",
       "conditions": [
         {
@@ -149,6 +226,6 @@
           "value": true
         }
       ]
-    }    
+    }
   ]
 }

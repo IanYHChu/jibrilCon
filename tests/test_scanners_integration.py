@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from jibrilcon.util.context import ScanContext
-from jibrilcon.scanners import docker_native, podman
+from jibrilcon.scanners import docker_native, lxc, podman
 
 
 # ------------------------------------------------------------------ #
@@ -61,6 +61,31 @@ class TestDockerScanner:
         assert containers[0]["status"] == "violated"
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "privileged" in vio_ids
+
+    def test_violation_has_enriched_fields_and_no_internals(self, make_rootfs):
+        """Violations must carry framework references and strip engine internals."""
+        r = make_rootfs
+        cid = "enr" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/enriched"},
+            hostconfig={"Privileged": True, "ReadonlyRootfs": False, "Binds": []},
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        priv = [v for v in result["results"][0]["violations"] if v["id"] == "privileged"][0]
+
+        # Enriched fields present
+        assert "severity" in priv
+        assert isinstance(priv["severity"], (int, float))
+        assert "risk" in priv
+        assert "remediation" in priv
+        assert "references" in priv
+        assert "mitre_attack" in priv["references"]
+
+        # Engine internals stripped
+        assert "conditions" not in priv
+        assert "logic" not in priv
 
     def test_multi_container_no_cross_contamination(self, make_rootfs):
         """P0 regression: each container must have independent violation data."""
@@ -211,6 +236,91 @@ class TestPodmanScanner:
         result = podman.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "missing_seccomp" in vio_ids
+
+
+# ------------------------------------------------------------------ #
+# LXC scanner
+# ------------------------------------------------------------------ #
+
+class TestLxcScanner:
+
+    _CLEAN_CONFIG = (
+        "lxc.rootfs.path = /var/lib/lxc/clean/rootfs\n"
+        "lxc.idmap = u 0 100000 65536\n"
+        "lxc.idmap = g 0 100000 65536\n"
+        "lxc.cap.drop = sys_admin net_raw\n"
+    )
+
+    _MISSING_IDMAP_CONFIG = (
+        "lxc.rootfs.path = /var/lib/lxc/noidmap/rootfs\n"
+        "lxc.cap.drop = sys_admin\n"
+    )
+
+    _INVALID_IDMAP_CONFIG = (
+        "lxc.rootfs.path = /var/lib/lxc/badmap/rootfs\n"
+        "lxc.idmap = u garbage_format\n"
+        "lxc.idmap = g 0 100000 65536\n"
+    )
+
+    _DANGEROUS_MOUNT_CONFIG = (
+        "lxc.rootfs.path = /var/lib/lxc/mounts/rootfs\n"
+        "lxc.idmap = u 0 100000 65536\n"
+        "lxc.idmap = g 0 100000 65536\n"
+        "lxc.cap.drop = sys_admin\n"
+        "lxc.mount.entry = /proc proc proc rw 0 0\n"
+    )
+
+    def test_clean_lxc_container(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config("clean", self._CLEAN_CONFIG)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        assert result["scanner"] == "lxc"
+        assert result["summary"]["lxc_scanned"] == 1
+        containers = result["results"]
+        assert len(containers) == 1
+        assert containers[0]["status"] == "clean"
+        assert containers[0]["violations"] == []
+
+    def test_missing_idmap(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config("noidmap", self._MISSING_IDMAP_CONFIG)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "missing_uidmap" in vio_ids
+        assert "missing_gidmap" in vio_ids
+
+    def test_invalid_idmap_format(self, make_rootfs):
+        """Regression: uidmap_format_invalid must fire on BAD format, not good."""
+        r = make_rootfs
+        r.add_lxc_config("badmap", self._INVALID_IDMAP_CONFIG)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        # uidmap is "garbage_format" -> regex won't match valid pattern
+        # -> not_regex_match returns False (because _IDMAP_RE won't parse it,
+        #    so uidmap stays None -> missing_uidmap fires instead)
+        assert "missing_uidmap" in vio_ids
+        # gidmap is valid -> should NOT fire gidmap_format_invalid
+        assert "gidmap_format_invalid" not in vio_ids
+
+    def test_dangerous_mount(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config("mounts", self._DANGEROUS_MOUNT_CONFIG)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "mount_proc_dangerous" in vio_ids
 
 
 # ------------------------------------------------------------------ #

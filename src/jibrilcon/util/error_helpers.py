@@ -33,6 +33,6 @@ def load_json_safe(path: Path) -> Dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
         return json.loads(text)
-    except (FileNotFoundError, PermissionError, json.JSONDecodeError) as exc:
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         logger.warning("Skipped %s: %s", path, exc)
         raise SoftIOError(str(path)) from exc

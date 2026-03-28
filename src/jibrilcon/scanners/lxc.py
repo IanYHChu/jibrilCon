@@ -318,7 +318,10 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
 
         # merge rcfile if present
         if rcfile_path:
-            rc_abs = safe_join(mount_path, rcfile_path.lstrip("/"))
+            try:
+                rc_abs = safe_join(mount_path, rcfile_path.lstrip("/"))
+            except ValueError:
+                rc_abs = None
             if rc_abs and rc_abs.is_file():
                 rc_entries = _parse_lxc_config(rc_abs)
                 entries = _merge_entries(entries, rc_entries)
@@ -332,7 +335,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
 
         # infer runs_as_root from context or missing mappings
         systemd_root = context.is_systemd_started("lxc", container_name) and context.is_user_missing(container_name)
-        mapping_root = idmap_info.get("uidmap") is None or idmap_info.get("gidmap") is None
+        mapping_root = idmap_info.get("uidmap") is None and idmap_info.get("gidmap") is None
         runs_as_root = systemd_root or mapping_root
 
         base_data = {**idmap_info, **capdrop_info, "runs_as_root": runs_as_root}
@@ -351,6 +354,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
                     v["lines"].extend(raw_lines)
                 else:
                     v["lines"].append(f"<missing> {cfg_key}")
+            v.pop("conditions", None)
+            v.pop("logic", None)
             config_vios.append(v)
 
         # ------------------ mount rules -------------------
@@ -365,6 +370,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
                 v["lines"] = [line] if line else []
                 for f in used_fields - {"source", "options"}:
                     v["lines"].append(f"<missing> {f}")
+                v.pop("conditions", None)
+                v.pop("logic", None)
                 vios.append(v)
             mount_results.extend(vios)
 
