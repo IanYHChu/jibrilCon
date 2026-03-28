@@ -4,7 +4,6 @@ import pytest
 
 from jibrilcon.util.path_utils import resolve_path, safe_join
 
-
 # ------------------------------------------------------------------ #
 # safe_join
 # ------------------------------------------------------------------ #

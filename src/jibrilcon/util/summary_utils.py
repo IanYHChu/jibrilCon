@@ -14,7 +14,7 @@ The helpers here are pure functions; no shared state is kept.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _add_numeric_fields(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
+def _add_numeric_fields(dst: dict[str, Any], src: dict[str, Any]) -> None:
     """
     Add every numeric field in *src* to *dst*, creating the key if absent.
 
@@ -40,8 +40,8 @@ def _add_numeric_fields(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
 
 
 def _merge_summaries(
-    total: Dict[str, Any],
-    part: Dict[str, Any],
+    total: dict[str, Any],
+    part: dict[str, Any],
     *,
     scanner_name: str = "unknown",
 ) -> None:
@@ -53,7 +53,7 @@ def _merge_summaries(
     total.setdefault("scanners_run", []).append(scanner_name)
 
 
-def _merge_results_stats(total: Dict[str, Any], results: List[Dict[str, Any]]) -> None:
+def _merge_results_stats(total: dict[str, Any], results: list[dict[str, Any]]) -> None:
     """
     Analyse per-unit results (container or service entries) and count how
     many are clean vs. violated.
@@ -79,7 +79,7 @@ def _merge_results_stats(total: Dict[str, Any], results: List[Dict[str, Any]]) -
 # ---------------------------------------------------------------------
 
 
-def generate_final_report(scanner_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def generate_final_report(scanner_results: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Build a unified report containing all scanner outputs plus a merged
     summary section.
@@ -92,7 +92,7 @@ def generate_final_report(scanner_results: List[Dict[str, Any]]) -> Dict[str, An
             - "summary": summary dict
             - "results": list of per-unit result entries
     """
-    final: Dict[str, Any] = {"report": scanner_results, "summary": {}}
+    final: dict[str, Any] = {"report": scanner_results, "summary": {}}
     summary = final["summary"]
 
     for block in scanner_results:

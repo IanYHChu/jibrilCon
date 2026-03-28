@@ -13,20 +13,19 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List
 
 from jibrilcon.util.path_utils import safe_join
 
 logger = logging.getLogger(__name__)
 
 
-def get_user_home_dirs(rootfs: str) -> List[str]:
+def get_user_home_dirs(rootfs: str) -> list[str]:
     """Parse /etc/passwd under *rootfs* and return resolved home directory paths.
 
     Validates that each path stays within the rootfs boundary using safe_join,
     and returns absolute paths (already prefixed with *rootfs*).
     """
-    homes: List[str] = []
+    homes: list[str] = []
     passwd = os.path.join(rootfs, "etc/passwd")
     if not os.path.exists(passwd):
         return homes

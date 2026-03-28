@@ -10,7 +10,6 @@ import pytest
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.scanner_loader import _iter_scanner_modules, run_scanners
 
-
 # ------------------------------------------------------------------ #
 # Helpers
 # ------------------------------------------------------------------ #

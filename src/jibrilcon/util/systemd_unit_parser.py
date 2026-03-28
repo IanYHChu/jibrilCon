@@ -23,7 +23,8 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from jibrilcon.util.context import ScanContext
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,10 @@ _UNIT_RE = re.compile(r"^(\w+)=(.*)$")
 # --------------------------------------------------------------------------- #
 # Configuration helpers
 # --------------------------------------------------------------------------- #
-def _load_filters(path: Optional[Path] = None) -> Dict[str, Any]:
+def _load_filters(path: Path | None = None) -> dict[str, Any]:
     target = path or _DEFAULT_FILTER_FILE
     try:
-        with open(target, "r", encoding="utf-8") as fh:
+        with open(target, encoding="utf-8") as fh:
             return json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError) as exc:
         logger.error("Failed to load systemd filters from %s: %s", target, exc)
@@ -49,8 +50,8 @@ def _load_filters(path: Optional[Path] = None) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Parsing helpers
 # --------------------------------------------------------------------------- #
-def _parse_unit_lines(lines: List[str]) -> Dict[str, List[str]]:
-    data: Dict[str, List[str]] = {}
+def _parse_unit_lines(lines: list[str]) -> dict[str, list[str]]:
+    data: dict[str, list[str]] = {}
     for ln in lines:
         ln = ln.strip()
         if not ln or ln.startswith("#") or "=" not in ln:
@@ -62,15 +63,15 @@ def _parse_unit_lines(lines: List[str]) -> Dict[str, List[str]]:
     return data
 
 
-def _is_container_service(exec_lines: List[str], keywords: List[str]) -> bool:
+def _is_container_service(exec_lines: list[str], keywords: list[str]) -> bool:
     text = " ".join(exec_lines).lower()
     return any(k.lower() in text for k in keywords)
 
 
 def _guess_engine_and_container(
-    exec_lines: List[str],
-    engine_map: Dict[str, Dict[str, str]],
-) -> Tuple[str, str]:
+    exec_lines: list[str],
+    engine_map: dict[str, dict[str, str]],
+) -> tuple[str, str]:
     joined = " ".join(exec_lines)
     joined_lower = joined.lower()
 
@@ -93,8 +94,8 @@ def _guess_engine_and_container(
 def scan_systemd_container_units(
     rootfs: str | Path,
     *,
-    filters_path: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
+    filters_path: Path | None = None,
+) -> list[dict[str, Any]]:
     """
     Walk ``rootfs`` for *.service files and return structured container units.
 
@@ -103,12 +104,12 @@ def scan_systemd_container_units(
         exec, path, fields, raw_lines
     """
     cfg = _load_filters(filters_path)
-    keywords: List[str] = cfg["container_keywords"]
-    engine_map: Dict[str, Dict[str, str]] = cfg["engine_detection"]
-    wanted_fields: List[str] = cfg["fields_to_keep"]
-    extraction_patterns: Dict[str, str] = cfg.get("extraction_patterns", {})
+    keywords: list[str] = cfg["container_keywords"]
+    engine_map: dict[str, dict[str, str]] = cfg["engine_detection"]
+    wanted_fields: list[str] = cfg["fields_to_keep"]
+    extraction_patterns: dict[str, str] = cfg.get("extraction_patterns", {})
 
-    unit_dirs_raw: List[str] = cfg.get(
+    unit_dirs_raw: list[str] = cfg.get(
         "unit_dirs",
         [
             "etc/systemd/system",
@@ -119,9 +120,9 @@ def scan_systemd_container_units(
     rootfs = Path(rootfs)
     unit_dirs = [rootfs / d.lstrip("/") for d in unit_dirs_raw]
 
-    exec_keys: List[str] = cfg.get("exec_keys", ["ExecStart", "ExecStartPre"])
+    exec_keys: list[str] = cfg.get("exec_keys", ["ExecStart", "ExecStartPre"])
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
 
     for udir in unit_dirs:
         if not udir.is_dir():
@@ -134,7 +135,7 @@ def scan_systemd_container_units(
 
             kvmap = _parse_unit_lines(raw)
 
-            exec_lines: List[str] = []
+            exec_lines: list[str] = []
             for key in exec_keys:
                 exec_lines.extend(kvmap.get(key, []))
 
@@ -143,8 +144,8 @@ def scan_systemd_container_units(
 
             engine, cname = _guess_engine_and_container(exec_lines, engine_map)
 
-            fields: Dict[str, Any] = {}
-            raw_lines: Dict[str, List[str]] = {}
+            fields: dict[str, Any] = {}
+            raw_lines: dict[str, list[str]] = {}
             for fld in wanted_fields:
                 vals = kvmap.get(fld, [])
                 if not vals:
@@ -179,7 +180,7 @@ def collect_systemd_containers(
     rootfs: str | Path,
     ctx: ScanContext,
     *,
-    filters_path: Optional[Path] = None,
+    filters_path: Path | None = None,
 ) -> None:
     """
     One-stop helper: parse *.service files under *rootfs* and cache results
@@ -213,7 +214,7 @@ def collect_systemd_containers(
 
         # --- cache Exec* lines for later reuse ------------------------
         raw = row.get("raw_lines", {})
-        all_exec: List[str] = []
+        all_exec: list[str] = []
         for key, lines in raw.items():
             if key.startswith("execstart"):
                 all_exec.extend(lines)

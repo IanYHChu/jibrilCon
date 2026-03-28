@@ -28,14 +28,14 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from jibrilcon.util.path_utils import resolve_path, safe_join
 from jibrilcon.util.config_loader import ConfigLoadError, load_json_config
 from jibrilcon.util.context import ScanContext
-from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
 from jibrilcon.util.passwd_utils import get_user_home_dirs
+from jibrilcon.util.path_utils import resolve_path, safe_join
+from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.violation_utils import process_violations
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 BASE_DIR = Path(__file__).resolve().parent
 RULE_PATH = BASE_DIR.parent / "rules" / "podman_config_rules.json"
+
+_CONTAINER_ID_DISPLAY_LEN = 12
 
 _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 _MODULE_RE = re.compile(r"(?:^|\s)--module\s+(?P<modfile>\S+)")
@@ -103,7 +105,7 @@ def _get_podman_data_root(rootfs: str) -> str:
     return "/var/lib/containers/storage"
 
 
-def _get_user_podman_roots(rootfs: str) -> List[str]:
+def _get_user_podman_roots(rootfs: str) -> list[str]:
     """Return rootless Podman storage directories under each user's home."""
     return [
         os.path.join(home, ".local/share/containers/storage")
@@ -111,7 +113,7 @@ def _get_user_podman_roots(rootfs: str) -> List[str]:
     ]
 
 
-def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
+def _discover_configs(rootfs: str) -> list[tuple[str, str]]:
     """
     Return list of *(container_name, config_path)* tuples.
     """
@@ -122,7 +124,7 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
         roots = []
     roots += _get_user_podman_roots(rootfs)
 
-    discovered: List[Tuple[str, str]] = []
+    discovered: list[tuple[str, str]] = []
 
     for base in roots:
         index_path = os.path.join(base, "overlay-containers", "containers.json")
@@ -133,7 +135,7 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
         for entry in index_data:
             cid = entry.get("id")
             names = entry.get("names", [])
-            name = names[0] if names else cid[:12]
+            name = names[0] if names else cid[:_CONTAINER_ID_DISPLAY_LEN]
             cfg_path = os.path.join(
                 base, "overlay-containers", cid, "userdata", "config.json"
             )
@@ -142,7 +144,7 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
     return discovered
 
 
-def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     """Produce data dict for rules_engine."""
     uid = cfg.get("process", {}).get("user", {}).get("uid", 0)
     if not isinstance(uid, int):
@@ -220,7 +222,7 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------
 
 
-def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
+def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     """
     Scan Podman container configurations under *mount_path*.
 
@@ -240,7 +242,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
     rules = rules_cfg.get("rules", [])
     if not rules:
         logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
-    containers: Dict[str, Dict[str, Any]] = {}
+    containers: dict[str, dict[str, Any]] = {}
     alert_count = 0
     warn_count = 0
     start_ts = time.time()
@@ -250,7 +252,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
 
         # 2) acquire Exec* command lines  -----------------
-        exec_lines: List[str] = context.get_exec_lines("podman", name)
+        exec_lines: list[str] = context.get_exec_lines("podman", name)
         for line in exec_lines:
             # --config <dir>
             m_cfg = _CONFIG_RE.search(line)

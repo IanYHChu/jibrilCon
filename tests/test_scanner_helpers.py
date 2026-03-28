@@ -3,10 +3,9 @@
 import json
 from pathlib import Path
 
-from jibrilcon.scanners.docker_native import _to_bool, _extract_fields
-from jibrilcon.scanners import docker_native, podman, lxc
+from jibrilcon.scanners import docker_native, lxc, podman
+from jibrilcon.scanners.docker_native import _extract_fields, _to_bool
 from jibrilcon.util.context import ScanContext
-
 
 # ------------------------------------------------------------------ #
 # Helpers

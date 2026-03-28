@@ -24,17 +24,17 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 import re
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from jibrilcon.util.path_utils import resolve_path, safe_join
 from jibrilcon.util.config_loader import ConfigLoadError, load_json_config
 from jibrilcon.util.context import ScanContext
-from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
 from jibrilcon.util.passwd_utils import get_user_home_dirs
+from jibrilcon.util.path_utils import resolve_path, safe_join
+from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.violation_utils import process_violations
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 RULE_PATH = BASE_DIR.parent / "rules" / "docker_config_rules.json"
+
+_CONTAINER_ID_DISPLAY_LEN = 12
 
 _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 
@@ -103,7 +105,7 @@ def _get_docker_data_root(rootfs: str) -> str:
     return cfg.get("data-root", "/var/lib/docker")
 
 
-def _get_user_docker_roots(rootfs: str) -> List[str]:
+def _get_user_docker_roots(rootfs: str) -> list[str]:
     """
     Return a list of rootless Docker data directories discovered in each
     user's home directory.
@@ -113,7 +115,7 @@ def _get_user_docker_roots(rootfs: str) -> List[str]:
     ]
 
 
-def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
+def _discover_container_dirs(rootfs: str) -> list[tuple[str, str, str]]:
     """
     Return a list of tuples:
 
@@ -126,7 +128,7 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
         roots = []
     roots += _get_user_docker_roots(rootfs)
 
-    discovered: List[Tuple[str, str, str]] = []
+    discovered: list[tuple[str, str, str]] = []
 
     for base in roots:
         cont_dir = os.path.join(base, "containers")
@@ -143,7 +145,7 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
             cfg = os.path.join(cdir, "config.v2.json")
             host = os.path.join(cdir, "hostconfig.json")
             if os.path.exists(cfg) and os.path.exists(host):
-                name = cid[:12]
+                name = cid[:_CONTAINER_ID_DISPLAY_LEN]
                 # try to read name from config
                 cfg_json = load_json_or_empty(cfg)
                 name = cfg_json.get("Name", "").lstrip("/") or name
@@ -151,7 +153,7 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
     return discovered
 
 
-def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]:
     """Pick out the fields needed by rules_engine."""
     sec_opts = host.get("SecurityOpt") or []
     if not isinstance(sec_opts, list):
@@ -222,7 +224,7 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
 # ---------------------------------------------------------------------
 
 
-def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
+def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     """
     Scan Docker container configurations under *mount_path*.
 
@@ -249,7 +251,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
     rules = rules_cfg.get("rules", [])
     if not rules:
         logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
-    containers: Dict[str, Dict[str, Any]] = {}
+    containers: dict[str, dict[str, Any]] = {}
     alert_count = 0
     warn_count = 0
     start_ts = time.time()
@@ -260,7 +262,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         host_json = load_json_or_empty(resolve_path(host_path, mount_path))
 
         # 2) acquire Exec* command lines  -----------------
-        exec_lines: List[str] = context.get_exec_lines("docker", name)
+        exec_lines: list[str] = context.get_exec_lines("docker", name)
         override_cfg_dir: str | None = None
         for line in exec_lines:
             m = _CONFIG_RE.search(line)

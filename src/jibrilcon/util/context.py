@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict
-from typing import Dict, Set, List, Tuple
 
 # ---------------------------------------------------------------------
 # Public class
@@ -41,11 +40,11 @@ class ScanContext:
 
     def __init__(self) -> None:
         # engine name (e.g. "docker", "lxc") -> set of container names
-        self._systemd_started: Dict[str, Set[str]] = defaultdict(set)
+        self._systemd_started: dict[str, set[str]] = defaultdict(set)
         # containers whose systemd service lacks a non-root User= setting
-        self._user_missing: Set[str] = set()
+        self._user_missing: set[str] = set()
         # key: (engine, container) -> list of Exec* command lines
-        self._exec_lines: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+        self._exec_lines: dict[tuple[str, str], list[str]] = defaultdict(list)
         # init system detected in rootfs (set by core.run_scan)
         self.init_system: str | None = None
 
@@ -74,7 +73,7 @@ class ScanContext:
             self._user_missing.add(container_name)
 
     def add_exec_lines(
-        self, engine: str, container_name: str, lines: List[str]
+        self, engine: str, container_name: str, lines: list[str]
     ) -> None:
         """
         Cache full ExecStart / ExecStartPre command lines for *container_name*
@@ -83,7 +82,7 @@ class ScanContext:
         with self._lock:
             self._exec_lines[(engine, container_name)] = list(lines)  # store copy
 
-    def get_exec_lines(self, engine: str, container_name: str) -> List[str]:
+    def get_exec_lines(self, engine: str, container_name: str) -> list[str]:
         """
         Return cached Exec* command lines for the given container, or [] if absent.
         """

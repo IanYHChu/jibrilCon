@@ -14,7 +14,6 @@ from jibrilcon.util.config_loader import (
 )
 from jibrilcon.util.context import ScanContext
 
-
 # ------------------------------------------------------------------ #
 # Helpers
 # ------------------------------------------------------------------ #

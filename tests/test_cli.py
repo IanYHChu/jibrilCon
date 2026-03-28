@@ -9,7 +9,6 @@ import pytest
 from jibrilcon import __version__
 from jibrilcon.cli import _colour, main
 
-
 # ------------------------------------------------------------------ #
 # --version flag
 # ------------------------------------------------------------------ #

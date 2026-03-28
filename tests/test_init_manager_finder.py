@@ -5,7 +5,6 @@ import pytest
 from jibrilcon.init_manager_finder import detect_init_system
 from jibrilcon.util.path_utils import resolve_path
 
-
 # A minimal fake ELF binary that contains "systemd" in its payload.
 _FAKE_SYSTEMD_ELF = b"\x7fELF\x02" + b"\x00" * 11 + b"systemd"
 

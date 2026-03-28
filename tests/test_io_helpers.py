@@ -4,7 +4,6 @@ import json
 
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
 
-
 # ------------------------------------------------------------------ #
 # deep_merge
 # ------------------------------------------------------------------ #

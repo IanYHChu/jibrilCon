@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from jibrilcon.util.passwd_utils import get_user_home_dirs
 
-
 # ------------------------------------------------------------------ #
 # Helpers
 # ------------------------------------------------------------------ #

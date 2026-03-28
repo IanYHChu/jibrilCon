@@ -39,7 +39,7 @@ version = {attr = "jibrilcon.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-jibrilcon = ["rules/*.json", "rules/*.md", "config/*.json", "config/*.md"]
+jibrilcon = ["py.typed", "rules/*.json", "rules/*.md", "config/*.json", "config/*.md"]
 
 [project.optional-dependencies]
 dev = [
@@ -95,3 +95,11 @@ disable_error_code = ["arg-type", "call-arg", "dict-item", "attr-defined"]
 
 [tool.ruff]
 target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501", "SIM105", "SIM117"]
+"src/jibrilcon/scanners/*" = ["B023"]

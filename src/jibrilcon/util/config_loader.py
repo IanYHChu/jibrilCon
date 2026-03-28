@@ -21,7 +21,7 @@ import logging
 import threading
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, FrozenSet
+from typing import Any
 
 # ---------------------------------------------------------------------
 # Constants and logger
@@ -44,7 +44,7 @@ class ConfigLoadError(RuntimeError):
 # ---------------------------------------------------------------------
 
 
-def _read_json_file(path: Path) -> Dict[str, Any]:
+def _read_json_file(path: Path) -> dict[str, Any]:
     """Read *path* as UTF-8 JSON and return the parsed dict."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -64,8 +64,8 @@ def _read_json_file(path: Path) -> Dict[str, Any]:
 def _load_json_config_cached(
     path: str | Path,
     *,
-    schema: FrozenSet[str] | None = None,
-) -> Dict[str, Any]:
+    schema: frozenset[str] | None = None,
+) -> dict[str, Any]:
     """Internal cached loader -- callers MUST hold *_lock*."""
     path = Path(path)
     data = _read_json_file(path)
@@ -84,8 +84,8 @@ def _load_json_config_cached(
 def load_json_config(
     path: str | Path,
     *,
-    schema: FrozenSet[str] | None = None,
-) -> Dict[str, Any]:
+    schema: frozenset[str] | None = None,
+) -> dict[str, Any]:
     """
     Read a UTF-8 JSON file and return its data as a dict.  The result is
     cached; pass the same *path* value to reuse the cached object.

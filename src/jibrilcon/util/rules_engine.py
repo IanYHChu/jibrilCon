@@ -29,8 +29,9 @@ import copy
 import logging
 import re
 import threading
+from collections.abc import Callable
 from functools import lru_cache, wraps
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -91,16 +92,16 @@ def _lte(a: Any, b: Any) -> bool:
     return a <= b
 
 
-def _in_op(a: Any, b: List[Any]) -> bool:
+def _in_op(a: Any, b: list[Any]) -> bool:
     return a in b
 
 
-def _not_in_op(a: Any, b: List[Any]) -> bool:
+def _not_in_op(a: Any, b: list[Any]) -> bool:
     return a not in b
 
 
 # Map operator string to implementation
-_OPERATOR_MAP: Dict[str, Callable[[Any, Any], bool]] = {
+_OPERATOR_MAP: dict[str, Callable[[Any, Any], bool]] = {
     "equals": _equals,
     "not_equals": _not_equals,
     "contains": _contains,
@@ -180,7 +181,7 @@ def _compile_regex(pattern: str) -> re.Pattern:
     return re.compile(pattern)
 
 
-def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
+def _match_condition(data: dict[str, Any], cond: dict[str, Any]) -> bool:
     """Return True if *cond* matches *data*, else False."""
     field = cond.get("field")
     operator = str(cond.get("operator", "")).lower()
@@ -202,7 +203,7 @@ def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
 _VALID_LOGIC = {"and", "or"}
 
 
-def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
+def _evaluate_rule_group(data: dict[str, Any], rule: dict[str, Any]) -> bool:
     """Evaluate all conditions in *rule* according to its logic."""
     logic = str(rule.get("logic", "and")).lower()
     if logic not in _VALID_LOGIC:
@@ -228,8 +229,8 @@ def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
 
 
 def evaluate_rules(
-    data: Dict[str, Any], rules: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    data: dict[str, Any], rules: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """
     Evaluate *rules* against *data*.
 
@@ -246,7 +247,7 @@ def evaluate_rules(
         All rules that matched; each element is the original rule dict.
         An empty list means the input passed without violations.
     """
-    output: List[Dict[str, Any]] = []
+    output: list[dict[str, Any]] = []
     for rule in rules:
         if _evaluate_rule_group(data, rule):
             output.append(copy.deepcopy(rule))

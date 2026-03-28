@@ -18,6 +18,7 @@ Features
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import json
 import os
@@ -51,10 +52,8 @@ def _atomic_write(binary: bytes, target: Path) -> None:
         os.replace(tmp_path, target)
     finally:
         # If os.replace() raised, ensure the temp file does not linger
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp_path)
-        except FileNotFoundError:
-            pass
 
 
 # ---------------------------------------------------------------------

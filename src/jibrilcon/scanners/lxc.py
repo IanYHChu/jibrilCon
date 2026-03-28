@@ -29,12 +29,11 @@ import shlex
 import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
 
 from jibrilcon.util.config_loader import ConfigLoadError, load_json_config
 from jibrilcon.util.context import ScanContext
-from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.path_utils import safe_join
+from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.systemd_unit_parser import scan_systemd_container_units
 from jibrilcon.util.violation_utils import process_violations
 
@@ -99,7 +98,7 @@ def _is_text_file(path: str) -> bool:
 def _file_contains_rootfs(
     path: Path,
     rootfs: str,
-    visited: Set[Path] | None = None,
+    visited: set[Path] | None = None,
     depth: int = 0,
 ) -> bool:
     """
@@ -139,7 +138,7 @@ def _file_contains_rootfs(
     return False
 
 
-def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
+def _get_lxc_rootfs_config_candidates(rootfs: str) -> set[Path]:
     """
     Search all files under rootfs that define 'lxc.rootfs.path'.
     These are considered LXC configuration candidates.
@@ -154,7 +153,7 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
     Set[Path]
         All LXC config file paths found in the filesystem.
     """
-    configs: Set[Path] = set()
+    configs: set[Path] = set()
     exclude_abs = {os.path.join(rootfs, d.lstrip("/")) for d in _EXCLUDE_DIRS}
     for dirpath, dirnames, filenames in os.walk(rootfs):
         # Prune excluded directories in-place so os.walk skips them entirely
@@ -172,7 +171,7 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
     return configs
 
 
-def _filter_active_lxc_configs(configs: Set[Path], rootfs: str) -> Set[Path]:
+def _filter_active_lxc_configs(configs: set[Path], rootfs: str) -> set[Path]:
     """
     From *configs* pick only those actively referenced by lxc-monitord.
     If lxc-monitord binary is missing, return configs unchanged.
@@ -182,7 +181,7 @@ def _filter_active_lxc_configs(configs: Set[Path], rootfs: str) -> Set[Path]:
         return configs  # fallback – cannot determine active set
 
     data = monitord.read_bytes().decode("utf-8", errors="ignore")
-    used: Set[Path] = set()
+    used: set[Path] = set()
 
     for cfg in configs:
         # heuristic: check if parent path appears in monitord text dump
@@ -192,9 +191,9 @@ def _filter_active_lxc_configs(configs: Set[Path], rootfs: str) -> Set[Path]:
     return used or configs
 
 
-def _parse_lxc_config(path: Path) -> Dict[str, List[str]]:
+def _parse_lxc_config(path: Path) -> dict[str, list[str]]:
     """Parse key = value lines into mapping key -> list[str]."""
-    result: Dict[str, List[str]] = {}
+    result: dict[str, list[str]] = {}
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError as exc:
@@ -212,7 +211,7 @@ def _parse_lxc_config(path: Path) -> Dict[str, List[str]]:
 
 
 @lru_cache(maxsize=4096)
-def _find_systemd_exec_lines(rootfs: str, cname: str) -> List[str]:
+def _find_systemd_exec_lines(rootfs: str, cname: str) -> list[str]:
     """
     Fallback helper -- call the central systemd parser so we respect the
     JSON-configured `unit_dirs` and `exec_keys`.  Filters rows to the LXC
@@ -222,7 +221,7 @@ def _find_systemd_exec_lines(rootfs: str, cname: str) -> List[str]:
     from scan() within the single LXC scanner thread.
     """
     rows = scan_systemd_container_units(rootfs)
-    lines: List[str] = []
+    lines: list[str] = []
     for row in rows:
         if row.get("engine") != "lxc" or row.get("container") != cname:
             continue
@@ -235,13 +234,13 @@ def _find_systemd_exec_lines(rootfs: str, cname: str) -> List[str]:
 
 
 def _extract_cli_params(
-    exec_lines: List[str],
-) -> Tuple[str | None, List[str]]:
+    exec_lines: list[str],
+) -> tuple[str | None, list[str]]:
     """
     Extract rcfile path and ordered KEY=VAL CLI overrides.
     """
     rcfile: str | None = None
-    overrides: List[str] = []
+    overrides: list[str] = []
 
     for cmd in exec_lines:
         if m := _RCFILE_RE.search(cmd):
@@ -257,8 +256,8 @@ def _extract_cli_params(
 
 
 def _merge_entries(
-    base: Dict[str, List[str]], extra: Dict[str, List[str]]
-) -> Dict[str, List[str]]:
+    base: dict[str, list[str]], extra: dict[str, list[str]]
+) -> dict[str, list[str]]:
     """Return new dict: *extra* replaces same-name keys in *base*."""
     merged = base.copy()
     for k, v in extra.items():
@@ -267,7 +266,7 @@ def _merge_entries(
 
 
 def _apply_cli_overrides(
-    entries: Dict[str, List[str]], override_tokens: List[str]
+    entries: dict[str, list[str]], override_tokens: list[str]
 ) -> None:
     """
     In-place patch of entries with KEY=VAL list.
@@ -278,7 +277,7 @@ def _apply_cli_overrides(
         entries[key.strip()] = [val.strip()]
 
 
-def _extract_idmap(entries: Dict[str, List[str]]) -> Dict[str, str]:
+def _extract_idmap(entries: dict[str, list[str]]) -> dict[str, str]:
     """Return uidmap / gidmap strings if present."""
     uidmap = gidmap = None
     for val in entries.get("lxc.idmap", []):
@@ -297,9 +296,9 @@ def _extract_idmap(entries: Dict[str, List[str]]) -> Dict[str, str]:
     return {"uidmap": uidmap, "gidmap": gidmap}
 
 
-def _extract_cap_drop(entries: Dict[str, List[str]]) -> Dict[str, List[str]]:
+def _extract_cap_drop(entries: dict[str, list[str]]) -> dict[str, list[str]]:
     """Return list of dropped capabilities."""
-    drops: List[str] = []
+    drops: list[str] = []
     for val in entries.get("lxc.cap.drop", []):
         if not isinstance(val, str):
             continue
@@ -309,7 +308,7 @@ def _extract_cap_drop(entries: Dict[str, List[str]]) -> Dict[str, List[str]]:
     return {"cap_drop": drops or None}
 
 
-def _extract_apparmor_profile(entries: Dict[str, List[str]]) -> Dict[str, str | None]:
+def _extract_apparmor_profile(entries: dict[str, list[str]]) -> dict[str, str | None]:
     """Return the AppArmor profile if set."""
     vals = entries.get("lxc.apparmor.profile", [])
     # Last value wins (LXC config override semantics)
@@ -317,14 +316,14 @@ def _extract_apparmor_profile(entries: Dict[str, List[str]]) -> Dict[str, str | 
     return {"apparmor_profile": profile}
 
 
-def _extract_net_type(entries: Dict[str, List[str]]) -> Dict[str, str | None]:
+def _extract_net_type(entries: dict[str, list[str]]) -> dict[str, str | None]:
     """Return the network type for the primary interface (lxc.net.0.type)."""
     vals = entries.get("lxc.net.0.type", [])
     net_type = vals[-1].strip() if vals else None
     return {"net_type": net_type}
 
 
-def _parse_mount_entry(entry: str) -> Dict[str, str]:
+def _parse_mount_entry(entry: str) -> dict[str, str]:
     """
     Given a single ``lxc.mount.entry`` line, return mapping:
 
@@ -345,7 +344,7 @@ def _parse_mount_entry(entry: str) -> Dict[str, str]:
 # ---------------------------------------------------------------------
 
 
-def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, object]:
+def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, object]:
     """
     Scan LXC container configs under *mount_path*.
 
@@ -368,7 +367,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
     config_rules = [r for r in all_rules if not r["id"].startswith("mount_")]
     mount_rules = [r for r in all_rules if r["id"].startswith("mount_")]
 
-    results: List[Dict[str, object]] = []
+    results: list[dict[str, object]] = []
     alert_count = warning_count = total_containers = 0
     start_ts = time.time()
 

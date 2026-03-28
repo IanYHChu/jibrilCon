@@ -12,15 +12,16 @@ dicts used by all scanners.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, Dict, List, Set
+from collections.abc import Callable
+from typing import Any
 
 
 def process_violations(
-    vios_raw: List[Dict[str, Any]],
+    vios_raw: list[dict[str, Any]],
     cfg_path: str,
     mount_path: str,
-    line_resolver: Callable[[Dict[str, Any], Set[str]], List[str]],
-) -> List[Dict[str, Any]]:
+    line_resolver: Callable[[dict[str, Any], set[str]], list[str]],
+) -> list[dict[str, Any]]:
     """Transform raw rule-engine hits into scanner-output violation dicts.
 
     Shared across Docker, Podman, and LXC scanners.  Each scanner provides
@@ -45,9 +46,9 @@ def process_violations(
         Cleaned violation dicts with ``source`` and ``lines`` set and
         internal keys (``conditions``, ``logic``) removed.
     """
-    vios: List[Dict[str, Any]] = []
+    vios: list[dict[str, Any]] = []
     for v in vios_raw:
-        used_fields: Set[str] = {
+        used_fields: set[str] = {
             c.get("field") for c in v.get("conditions", []) if c.get("field")
         }
         v["source"] = "/" + os.path.relpath(cfg_path, mount_path)

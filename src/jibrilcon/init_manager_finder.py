@@ -32,6 +32,13 @@ from jibrilcon.util.path_utils import resolve_path
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------
+
+_READ_SIZE_64BIT = 65536
+_READ_SIZE_32BIT = 32768
+
+# ---------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------
 
@@ -58,7 +65,7 @@ def _elf_contains(path: Path, marker: bytes) -> bool:
             # EI_CLASS @ byte 4 → 1 = 32-bit, 2 = 64-bit
             is_64 = hdr[4] == 2
             fh.seek(0)
-            data = fh.read(65536 if is_64 else 32768)
+            data = fh.read(_READ_SIZE_64BIT if is_64 else _READ_SIZE_32BIT)
         return marker in data
     except OSError:
         return False

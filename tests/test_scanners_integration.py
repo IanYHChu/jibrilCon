@@ -3,9 +3,8 @@
 import json
 from pathlib import Path
 
-from jibrilcon.util.context import ScanContext
 from jibrilcon.scanners import docker_native, lxc, podman
-
+from jibrilcon.util.context import ScanContext
 
 # ------------------------------------------------------------------ #
 # Helpers

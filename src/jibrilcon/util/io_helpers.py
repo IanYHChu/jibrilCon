@@ -11,17 +11,16 @@ Small I/O and data-structure utilities shared by scanner modules.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
-from jibrilcon.util.error_helpers import load_json_safe, SoftIOError
-
+from jibrilcon.util.error_helpers import SoftIOError, load_json_safe
 
 _MAX_MERGE_DEPTH = 32
 
 
 def deep_merge(
-    dst: Dict[str, Any], src: Dict[str, Any], *, _depth: int = 0
-) -> Dict[str, Any]:
+    dst: dict[str, Any], src: dict[str, Any], *, _depth: int = 0
+) -> dict[str, Any]:
     """Recursively merge *src* into *dst*; *src* values take precedence."""
     if _depth > _MAX_MERGE_DEPTH:
         raise RecursionError("deep_merge exceeded maximum depth")
@@ -33,7 +32,7 @@ def deep_merge(
     return dst
 
 
-def load_json_or_empty(path: str | Path) -> Dict[str, Any]:
+def load_json_or_empty(path: str | Path) -> dict[str, Any]:
     """Read *path* as JSON; return {} on expected I/O or parse errors."""
     try:
         return load_json_safe(Path(path))

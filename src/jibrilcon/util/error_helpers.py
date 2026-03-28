@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class SoftIOError(RuntimeError):
     pass
 
 
-def load_json_safe(path: Path) -> Dict[str, Any]:
+def load_json_safe(path: Path) -> dict[str, Any]:
     """
     Read *path* as UTF-8 JSON.
 

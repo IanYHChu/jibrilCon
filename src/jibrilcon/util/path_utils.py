@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import threading
 from functools import lru_cache, wraps
-from typing import Optional, Set
 from pathlib import Path
 
 # ---------------------------------------------------------------------
@@ -54,7 +53,7 @@ def _validate_component(name: str) -> None:
 def _resolve_recursive(
     path: str,
     rootfs_path: str,
-    _seen: Optional[Set[str]] = None,
+    _seen: set[str] | None = None,
     _depth: int = 0,
 ) -> str:
     """

@@ -26,14 +26,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
 
-from jibrilcon.util.context import ScanContext
 from jibrilcon.init_manager_finder import detect_init_system
-
-from jibrilcon.util.systemd_unit_parser import collect_systemd_containers
+from jibrilcon.util.context import ScanContext
 from jibrilcon.util.scanner_loader import run_scanners
 from jibrilcon.util.summary_utils import generate_final_report
+from jibrilcon.util.systemd_unit_parser import collect_systemd_containers
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +42,10 @@ logger = logging.getLogger(__name__)
 def run_scan(
     mount_path: str | Path,
     *,
-    filters_path: Optional[Path] = None,
+    filters_path: Path | None = None,
     max_workers: int = 8,
     scanner_timeout: float = 300.0,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """
     Execute all scanners against *mount_path* and return the final report.
 
@@ -91,7 +89,7 @@ def run_scan(
     context.init_system = init_sys
 
     # 2. Run scanners (thread-parallel) via util.scanner_loader
-    results: List[Dict[str, object]] = run_scanners(
+    results: list[dict[str, object]] = run_scanners(
         str(mount_path),
         context=context,
         max_workers=max_workers,

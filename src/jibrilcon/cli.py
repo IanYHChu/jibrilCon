@@ -26,13 +26,12 @@ import argparse
 import errno
 import json
 import logging
-from pathlib import Path
-from jibrilcon.util.logging_utils import init_logging
 import sys
-from typing import Dict
+from pathlib import Path
 
 from jibrilcon import __version__
 from jibrilcon.core import run_scan
+from jibrilcon.util.logging_utils import init_logging
 from jibrilcon.util.report_writer import write_report  # handles .json or .json.gz
 
 # ---------------------------------------------------------------------
@@ -47,7 +46,7 @@ def _colour(val: str, colour: str, enable: bool = True) -> str:
     return f"\033[{codes[colour]}m{val}\033[0m"
 
 
-def _print_summary(summary: Dict[str, int], use_color: bool) -> None:
+def _print_summary(summary: dict[str, int], use_color: bool) -> None:
     alerts = summary.get("alerts", 0)
     warnings = summary.get("warnings", 0)
     clean = summary.get("clean", 0)

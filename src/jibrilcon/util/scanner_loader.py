@@ -19,10 +19,10 @@ import importlib
 import logging
 import pkgutil
 import time as _time
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List
+from typing import Any
 
 from jibrilcon.util.context import ScanContext
 
@@ -44,7 +44,7 @@ _SCANNER_TIMEOUT: float = 300.0
 # ---------------------------------------------------------------------
 
 
-def _iter_scanner_modules() -> List[ModuleType]:
+def _iter_scanner_modules() -> list[ModuleType]:
     """Import every *.py file under scanners/ and yield modules."""
     try:
         pkg = importlib.import_module(_SCANNER_PKG)
@@ -54,7 +54,7 @@ def _iter_scanner_modules() -> List[ModuleType]:
 
     base_dir = Path(pkg.__file__).parent
 
-    modules: List[ModuleType] = []
+    modules: list[ModuleType] = []
     for info in sorted(pkgutil.iter_modules([str(base_dir)]), key=lambda x: x.name):
         full_name = f"{_SCANNER_PKG}.{info.name}"
         try:
@@ -75,7 +75,7 @@ def run_scanners(
     context: ScanContext | None = None,
     max_workers: int = _MAX_WORKERS,
     scanner_timeout: float = _SCANNER_TIMEOUT,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Locate every scanner's scan() and execute them in a ThreadPool.
 
@@ -108,7 +108,7 @@ def run_scanners(
         logger.warning("No scanners found under %s", _SCANNER_PKG)
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(max_workers, len(scanners))) as exe:
         future_map = {
             exe.submit(fn, mount_path, context=context): name for name, fn in scanners

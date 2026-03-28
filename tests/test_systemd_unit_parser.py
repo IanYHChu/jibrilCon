@@ -2,13 +2,12 @@
 
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.systemd_unit_parser import (
-    _parse_unit_lines,
-    _is_container_service,
     _guess_engine_and_container,
-    scan_systemd_container_units,
+    _is_container_service,
+    _parse_unit_lines,
     collect_systemd_containers,
+    scan_systemd_container_units,
 )
-
 
 # ------------------------------------------------------------------ #
 # _parse_unit_lines
