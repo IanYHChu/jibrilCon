@@ -105,3 +105,58 @@ before adding heavy logic.
   - YAML rule syntax (optional for readability)
   - K8s / K3s workload policies
   - Context-aware rules (cross-container correlation)
+
+---
+
+## Rule Reference
+
+Complete list of all built-in rules, grouped by scanner and sorted by severity (descending).
+
+### Docker
+
+| ID | Type | Severity | Description |
+| -- | ---- | -------- | ----------- |
+| `privileged` | alert | 9.0 | Container is running in privileged mode |
+| `host_pid_namespace` | alert | 8.5 | Container shares the host's process namespace |
+| `host_network_namespace` | alert | 8.0 | Container shares the host's network namespace |
+| `dangerous_capabilities_added` | alert | 8.0 | Container has dangerous kernel capabilities added |
+| `host_ipc_namespace` | alert | 7.5 | Container shares the host's IPC namespace |
+| `runs_as_root` | alert | 6.0 | Container launched by a systemd service without a non-root User directive |
+| `apparmor_disabled` | warning | 6.0 | AppArmor profile is set to unconfined |
+| `binds_not_readonly` | warning | 5.0 | At least one bind mount is not readonly |
+| `seccomp_disabled` | warning | 5.0 | Seccomp profile is explicitly disabled (seccomp=unconfined) |
+| `cap_drop_missing` | warning | 5.0 | No capabilities explicitly dropped |
+| `readonly_rootfs_missing` | warning | 4.0 | Readonly root filesystem is not enabled |
+
+### LXC
+
+| ID | Type | Severity | Description |
+| -- | ---- | -------- | ----------- |
+| `missing_uidmap` | alert | 8.0 | Missing unprivileged UID map (uidmap not set) |
+| `missing_gidmap` | alert | 8.0 | Missing unprivileged GID map (gidmap not set) |
+| `uidmap_format_invalid` | alert | 8.0 | UID map format invalid (should be '0 <non-zero> <non-zero>') |
+| `gidmap_format_invalid` | alert | 8.0 | GID map format invalid (should be '0 <non-zero> <non-zero>') |
+| `mount_proc_dangerous` | alert | 8.0 | Mounting /proc is dangerous |
+| `mount_sys_dangerous` | alert | 8.0 | Mounting /sys is dangerous |
+| `host_network` | alert | 7.5 | Container shares the host network namespace |
+| `cap_drop_missing` | alert | 7.0 | No capabilities are dropped (lxc.cap.drop not set) |
+| `mount_run_dangerous` | alert | 7.0 | Mounting /run is dangerous |
+| `runs_as_root` | alert | 7.0 | LXC container is running as root |
+| `mount_dev_should_be_ro` | warning | 7.0 | Mounting /dev (or subpaths) should be readonly |
+| `apparmor_disabled` | warning | 6.0 | AppArmor profile is set to unconfined |
+| `mount_usr_should_be_ro` | warning | 5.5 | Mounting /usr should be readonly |
+
+### Podman
+
+| ID | Type | Severity | Description |
+| -- | ---- | -------- | ----------- |
+| `has_cap_sys_admin` | alert | 9.0 | Bounding set includes CAP_SYS_ADMIN (privileged) |
+| `host_pid_namespace` | alert | 8.5 | Container shares the host PID namespace |
+| `host_network_namespace` | alert | 8.0 | Container shares the host network namespace |
+| `dangerous_caps_present` | alert | 8.0 | Container has dangerous kernel capabilities |
+| `host_ipc_namespace` | alert | 7.5 | Container shares the host IPC namespace |
+| `runs_as_root` | alert | 7.0 | Container runs as root (UID 0) |
+| `service_user_missing` | alert | 6.0 | Systemd service unit does not set a non-root User directive |
+| `seccomp_disabled` | warning | 6.0 | Seccomp profile is not defined |
+| `binds_not_readonly` | warning | 5.0 | Bind mounts exist that are not readonly |
+| `readonly_rootfs_missing` | warning | 4.0 | Readonly root filesystem is not enabled |

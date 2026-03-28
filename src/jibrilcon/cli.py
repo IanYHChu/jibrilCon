@@ -23,6 +23,7 @@ focused on UX.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import logging
 from pathlib import Path
@@ -66,9 +67,29 @@ def _print_summary(summary: Dict[str, int], use_color: bool) -> None:
 
 
 def main() -> None:
+    _EPILOG = """\
+examples:
+  %(prog)s /mnt/target-rootfs
+      Scan a mounted rootfs and print results to stdout.
+
+  %(prog)s /mnt/target-rootfs -o report.json
+      Scan and write a full JSON report to disk.
+
+  %(prog)s /mnt/target-rootfs -o report.json.gz --log-level debug
+      Scan with verbose logging and write a gzip-compressed report.
+
+exit codes:
+  0   Scan completed successfully (findings may still be present).
+  1   Scan failed due to a runtime or I/O error.
+  2   Invalid command-line arguments.
+  130 Interrupted by Ctrl-C (SIGINT).
+"""
+
     parser = argparse.ArgumentParser(
-        description="jibrilcon container configuration scanner",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="jibrilcon -- static risk scanner for container "
+        "configurations inside embedded Linux rootfs images",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument(
@@ -78,31 +99,37 @@ def main() -> None:
     )
     parser.add_argument(
         "mount_path",
-        help="Path where the filesystem image is mounted read-only",
+        help="path to the mounted rootfs directory (read-only access is "
+        "sufficient; the scanner never modifies the target filesystem)",
     )
     parser.add_argument(
         "-o",
         "--output",
-        help="Write full JSON (or .json.gz) report to this path",
+        help="write the full JSON report to this path; use a .json.gz "
+        "extension for gzip-compressed output",
     )
     parser.add_argument(
         "--no-color",
         action="store_true",
         default=False,
-        help="Disable ANSI colour in terminal summary",
+        help="disable ANSI colour codes in the terminal summary",
     )
     parser.add_argument(
         "--log-level",
         choices=["debug", "info", "warning", "error", "critical"],
         default="info",
-        help="Set logging threshold (default: info)",
+        help="set logging verbosity: debug=trace every file inspected, "
+        "info=progress and findings, warning=anomalies only "
+        "(default: info)",
     )
     parser.add_argument(
         "--max-workers",
         type=int,
         default=8,
         metavar="N",
-        help="Maximum number of concurrent scanner threads (default: 8)",
+        help="maximum number of concurrent scanner threads; set to 1 for "
+        "sequential execution (default: 8, limited by available "
+        "scanner modules)",
     )
 
     args = parser.parse_args()
@@ -136,9 +163,33 @@ def main() -> None:
             _print_summary(report["summary"], use_color=not args.no_color)
     except KeyboardInterrupt:
         sys.exit(130)
-    except (RuntimeError, OSError) as exc:
+    except RuntimeError as exc:
         logger.error("Scan failed: %s", exc, exc_info=True)
-        print(f"Error: {exc}", file=sys.stderr)
+        print(
+            f"Error: scan aborted during filesystem analysis: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except OSError as exc:
+        logger.error("Scan failed: %s", exc, exc_info=True)
+        hint = ""
+        if exc.errno == errno.EACCES or exc.errno == errno.EPERM:
+            hint = (
+                "\nHint: permission denied -- ensure the current user "
+                "has read access to the mounted rootfs, or re-run with "
+                "appropriate permissions (e.g. sudo)."
+            )
+        elif exc.errno == errno.ENOENT:
+            hint = (
+                "\nHint: a required file or directory was not found; "
+                "verify that the rootfs is fully mounted."
+            )
+        elif exc.errno == errno.ENOSPC:
+            hint = (
+                "\nHint: no space left on device; free disk space "
+                "and retry."
+            )
+        print(f"Error: I/O failure during scan: {exc}{hint}", file=sys.stderr)
         sys.exit(1)
 
 

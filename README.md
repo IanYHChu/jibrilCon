@@ -75,6 +75,38 @@ If `--output` is not specified, the report is printed to stdout. Use
 
 ---
 
+## Programmatic API
+
+jibrilcon can be used as a Python library for integration into larger
+toolchains or custom automation scripts.
+
+```python
+from pathlib import Path
+from jibrilcon.core import run_scan
+from jibrilcon.util.report_writer import write_report
+
+# Run a scan and get the report as a dict
+report = run_scan(
+    "/mnt/target-rootfs",
+    max_workers=4,          # concurrent scanner threads (default: 8)
+    scanner_timeout=300.0,  # per-scanner timeout in seconds
+)
+
+# Inspect results programmatically
+for block in report["report"]:
+    print(f"{block['scanner']}: {block['summary']}")
+
+# Write to disk (JSON or gzip, determined by file extension)
+write_report(report, Path("report.json"))
+write_report(report, Path("report.json.gz"))  # auto-compressed
+```
+
+`run_scan()` returns the same dict structure documented in the
+[Report Format](#report-format) section below. `write_report()` performs
+an atomic write (temp file + rename) so partial files are never left on disk.
+
+---
+
 ## Report Format
 
 ### Top-level Structure
@@ -149,6 +181,65 @@ Each violation includes actionable context and framework references:
 | `references` | object | Framework mapping (MITRE ATT&CK, CIS, NIST) |
 | `source` | string | Config file path relative to mount point |
 | `lines` | array | Specific config entries that triggered the rule |
+
+### Example Output
+
+A realistic report for a Docker container with two violations:
+
+```json
+{
+  "report": [
+    {
+      "scanner": "docker",
+      "summary": { "alerts": 1, "warnings": 1 },
+      "results": [
+        {
+          "container": "web-gateway",
+          "status": "violated",
+          "violations": [
+            {
+              "id": "privileged",
+              "type": "alert",
+              "severity": 9.0,
+              "description": "Container is running in privileged mode",
+              "risk": "Grants full access to all host devices and disables most kernel isolation.",
+              "remediation": "Remove --privileged flag. Use --cap-add for specific capabilities.",
+              "references": {
+                "mitre_attack": ["T1611"],
+                "cis_docker_benchmark": ["5.4"],
+                "nist_800_190": ["4.4"]
+              },
+              "source": "/var/lib/docker/containers/abc123/config.v2.json",
+              "lines": ["HostConfig.Privileged = True"]
+            },
+            {
+              "id": "pid_mode",
+              "type": "warning",
+              "severity": 5.0,
+              "description": "Container shares the host PID namespace",
+              "risk": "Processes inside the container can see and signal host processes.",
+              "remediation": "Remove --pid=host unless process visibility is required.",
+              "references": {
+                "mitre_attack": ["T1611"],
+                "cis_docker_benchmark": ["5.15"]
+              },
+              "source": "/var/lib/docker/containers/abc123/hostconfig.json",
+              "lines": ["PidMode = host"]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "alerts": 1,
+    "warnings": 1,
+    "clean": 0,
+    "violated": 1,
+    "scanners_run": ["docker"]
+  }
+}
+```
 
 ### Severity Scale
 
@@ -242,6 +333,10 @@ Include these optional fields in any rule definition:
 }
 ```
 
+For full rule DSL documentation -- including all supported operators,
+nested rule groups, and guidelines for writing new rules -- see
+[`src/jibrilcon/rules/README.md`](src/jibrilcon/rules/README.md).
+
 ---
 
 ## Development
@@ -267,6 +362,67 @@ ruff check src/ tests/
 | 1 | Runtime error (e.g., permission denied, corrupted config) |
 | 2 | Argument error (invalid flag, missing mount path) |
 | 130 | Interrupted by user (Ctrl+C / SIGINT) |
+
+---
+
+## Troubleshooting / FAQ
+
+**"Permission denied" when scanning a mount path**
+
+The scanner needs read access to all files under the rootfs. Either run
+as root or adjust directory permissions:
+
+```bash
+sudo python3 -m jibrilcon /mnt/target-rootfs
+```
+
+**No containers detected**
+
+jibrilcon discovers containers by parsing systemd service files. Verify
+that the rootfs contains `.service` units that reference a container
+runtime (docker, podman, lxc). If the image uses sysvinit or openrc,
+confirm that the init system was detected correctly by checking the log
+output at `--log-level debug`.
+
+**Scan is slow**
+
+The LXC scanner performs a full `os.walk` of the rootfs because LXC
+config paths are not predictable -- this is by design, not a bug. For
+large filesystems, expect longer scan times. You can limit parallelism
+with `--max-workers 1` for lower resource usage, or increase it for
+faster I/O throughput on SSDs.
+
+**How to enable verbose logging**
+
+```bash
+python3 -m jibrilcon /mnt/target-rootfs --log-level debug
+```
+
+This traces every file inspected and every rule evaluated, which is
+useful for diagnosing missed detections or understanding scanner behavior.
+
+**How to integrate with CI/CD**
+
+Use the exit code and JSON output for automation:
+
+```bash
+python3 -m jibrilcon /mnt/rootfs --no-color -o report.json
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo "Scan failed (exit code $rc)" >&2
+  exit $rc
+fi
+# Parse report.json for alerts/warnings
+alerts=$(python3 -c "import json; r=json.load(open('report.json')); print(r['summary']['alerts'])")
+if [ "$alerts" -gt 0 ]; then
+  echo "Found $alerts alert(s) -- failing pipeline" >&2
+  exit 1
+fi
+```
+
+Exit code 0 means the scan completed (violations may still be present).
+Check `summary.alerts` in the JSON output to gate on actual findings.
+See [Exit Codes](#exit-codes) for the full table.
 
 ---
 
