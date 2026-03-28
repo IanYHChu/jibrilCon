@@ -44,8 +44,7 @@ BASE_DIR = Path(__file__).resolve().parent
 RULE_PATH = BASE_DIR.parent / "rule" / "lxc_config_rules.json"
 
 # Regex patterns
-_IDMAP_RE = re.compile(r"^lxc\.idmap\s*=\s*([ug])\s+(\d+)\s+(\d+)\s+(\d+)")
-_CAPDROP_RE = re.compile(r"^lxc\.cap\.drop\s*=\s*(.+)$")
+_IDMAP_RE = re.compile(r"^([ug])\s+(\d+)\s+(\d+)\s+(\d+)")
 
 _RCFILE_RE = re.compile(r"(?:^|\s)(?:-f|--rcfile)\s+(?P<rcfile>\S+)")
 _DEFINE_RE = re.compile(
@@ -241,7 +240,7 @@ def _extract_idmap(entries: Dict[str, List[str]]) -> Dict[str, str]:
     """Return uidmap / gidmap strings if present."""
     uidmap = gidmap = None
     for val in entries.get("lxc.idmap", []):
-        m = _IDMAP_RE.match(f"lxc.idmap = {val}")
+        m = _IDMAP_RE.match(val.strip())
         if not m:
             continue
         tag, start, size, count = m.groups()
@@ -257,9 +256,9 @@ def _extract_cap_drop(entries: Dict[str, List[str]]) -> Dict[str, List[str]]:
     """Return list of dropped capabilities."""
     drops: List[str] = []
     for val in entries.get("lxc.cap.drop", []):
-        m = _CAPDROP_RE.match(f"lxc.cap.drop = {val}")
-        if m:
-            drops.extend(m.group(1).split())
+        stripped = val.strip()
+        if stripped:
+            drops.extend(stripped.split())
     return {"cap_drop": drops or None}
 
 

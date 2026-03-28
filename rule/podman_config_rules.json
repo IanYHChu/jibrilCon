@@ -20,9 +20,9 @@
         "logic": "and",
         "conditions": [
           {
-            "field": "process.capabilities.bounding",
-            "operator": "contains",
-            "value": "CAP_SYS_ADMIN"
+            "field": "has_cap_sys_admin",
+            "operator": "equals",
+            "value": true
           }
         ]
       },
@@ -47,7 +47,8 @@
         "conditions": [
           {
             "field": "seccomp",
-            "operator": "not_exists"
+            "operator": "equals",
+            "value": false
           }
         ]
       }

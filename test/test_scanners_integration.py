@@ -172,11 +172,7 @@ class TestPodmanScanner:
         assert "runs_as_root" not in alert_ids
         assert "has_cap_sys_admin" not in alert_ids
 
-    def test_cap_sys_admin_rule_field_mismatch(self, make_rootfs):
-        """Demonstrate that the has_cap_sys_admin rule currently does NOT
-        trigger because the rule JSON checks 'process.capabilities.bounding'
-        but _extract_fields stores the value under 'has_cap_sys_admin'.
-        This is a known pre-existing issue in the rule definition."""
+    def test_cap_sys_admin_alert(self, make_rootfs):
         r = make_rootfs
         cid = "pod" * 8 + "2" * 40
         r.add_podman_container(
@@ -194,11 +190,27 @@ class TestPodmanScanner:
         ctx = _make_context()
         result = podman.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
-        # NOTE: has_cap_sys_admin rule does NOT match because the rule JSON
-        # field "process.capabilities.bounding" does not match the extracted
-        # field name "has_cap_sys_admin". This test documents the current
-        # behavior; fixing the rule/field mapping is a separate task.
-        assert "has_cap_sys_admin" not in vio_ids
+        assert "has_cap_sys_admin" in vio_ids
+
+    def test_missing_seccomp_warning(self, make_rootfs):
+        r = make_rootfs
+        cid = "pod" * 8 + "3" * 40
+        r.add_podman_container(
+            cid,
+            "noseccomp",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": []},
+                },
+                "mounts": [],
+                "linux": {},
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "missing_seccomp" in vio_ids
 
 
 # ------------------------------------------------------------------ #

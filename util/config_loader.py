@@ -20,7 +20,7 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Set
+from typing import Any, Dict, FrozenSet
 
 # ---------------------------------------------------------------------
 # Constants and logger
@@ -57,7 +57,7 @@ def _read_json_file(path: Path) -> Dict[str, Any]:
 def load_json_config(
     path: str | Path,
     *,
-    schema: Set[str] | None = None,
+    schema: FrozenSet[str] | None = None,
 ) -> Dict[str, Any]:
     """
     Read a UTF-8 JSON file and return its data as a dict.  The result is
@@ -67,8 +67,9 @@ def load_json_config(
     ----------
     path : str | Path
         File location on disk.
-    schema : set[str] | None
-        Optional set of required top-level keys.
+    schema : frozenset[str] | None
+        Optional frozenset of required top-level keys (must be hashable
+        for lru_cache).
 
     Raises
     ------
