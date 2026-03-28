@@ -6,7 +6,22 @@ from unittest.mock import patch
 
 import pytest
 
+from jibrilcon import __version__
 from jibrilcon.cli import _colour, main
+
+
+# ------------------------------------------------------------------ #
+# --version flag
+# ------------------------------------------------------------------ #
+
+
+def test_version_flag(capsys):
+    with patch("sys.argv", ["jibrilcon", "--version"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert __version__ in captured.out
 
 
 # ------------------------------------------------------------------ #
