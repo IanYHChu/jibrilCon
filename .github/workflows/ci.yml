@@ -57,4 +57,4 @@ jobs:
       - name: Bandit security scan
         run: bandit -r src/ -c pyproject.toml
       - name: Dependency vulnerability scan
-        run: pip-audit
+        run: pip-audit --ignore-vuln CVE-2026-4539  # pygments, no fix available yet
