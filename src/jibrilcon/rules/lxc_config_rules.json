@@ -270,6 +270,66 @@
           "operator": "not_exists"
         }
       ]
+    },
+    {
+      "id": "no_new_privs_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "lxc.no_new_privs is not enabled",
+      "risk": "Without no_new_privs, processes inside the container can gain more privileges than their parent via setuid binaries or kernel exploits.",
+      "remediation": "Add 'lxc.no_new_privs = 1' to the LXC container configuration.",
+      "references": {
+        "mitre_attack": ["T1548"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "no_new_privs_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "seccomp_profile_missing",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "No seccomp profile is configured",
+      "risk": "Without a seccomp profile, the container process can invoke any syscall the kernel allows, expanding the attack surface for kernel exploits.",
+      "remediation": "Add 'lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp' or a custom seccomp profile to the LXC configuration.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "seccomp_profile_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cap_keep_dangerous",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "lxc.cap.keep retains dangerous capabilities",
+      "risk": "Keeping dangerous capabilities such as sys_admin, sys_ptrace, sys_module, net_raw, or net_admin enables kernel module loading, process tracing, network-level attacks, and container escape.",
+      "remediation": "Remove dangerous capabilities from lxc.cap.keep. Only keep the minimum capabilities required by the workload.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cap_keep_dangerous",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

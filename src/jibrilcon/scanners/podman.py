@@ -68,6 +68,21 @@ _DANGEROUS_CAPS = frozenset(
     }
 )
 
+_DANGEROUS_BIND_PATHS = frozenset(
+    {
+        "/",
+        "/proc",
+        "/sys",
+        "/dev",
+        "/etc",
+        "/root",
+        "/home",
+        "/var/run/docker.sock",
+        "/run/containerd/containerd.sock",
+        "/var/run/crio/crio.sock",
+    }
+)
+
 # Map rule field names to JSON keys (used by report writer if needed)
 _FIELD_TO_CONFIG_KEY = {
     "process.user.uid": "process.user.uid",
@@ -80,6 +95,10 @@ _FIELD_TO_CONFIG_KEY = {
     "host_network_namespace": "linux.namespaces",
     "host_ipc_namespace": "linux.namespaces",
     "dangerous_caps_present": "process.capabilities.bounding",
+    "dangerous_bind_path": "mounts[].source",
+    "no_new_privileges_missing": "process.noNewPrivileges",
+    "apparmor_disabled": "process.apparmorProfile",
+    "mount_propagation_shared": "mounts[].options",
 }
 
 # ---------------------------------------------------------------------
@@ -204,6 +223,32 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     host_network_namespace = "network" not in ns_types_present
     host_ipc_namespace = "ipc" not in ns_types_present
 
+    # --- Dangerous bind paths ---
+    dangerous_bind_path = any(
+        isinstance(m, dict)
+        and m.get("type") == "bind"
+        and m.get("source", "") in _DANGEROUS_BIND_PATHS
+        for m in mounts
+    )
+
+    # --- no-new-privileges ---
+    no_new_privs = cfg.get("process", {}).get("noNewPrivileges", False)
+    no_new_privileges_missing = no_new_privs is not True
+
+    # --- AppArmor disabled ---
+    aa_profile = cfg.get("process", {}).get("apparmorProfile", "")
+    apparmor_disabled = aa_profile == "unconfined"
+
+    # --- Mount propagation shared/rshared ---
+    mount_propagation_shared = any(
+        isinstance(m, dict)
+        and (
+            "shared" in m.get("options", [])
+            or "rshared" in m.get("options", [])
+        )
+        for m in mounts
+    )
+
     return {
         "process.user.uid": uid,
         "has_cap_sys_admin": has_cap_sys_admin,
@@ -214,6 +259,10 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
         "host_network_namespace": host_network_namespace,
         "host_ipc_namespace": host_ipc_namespace,
         "dangerous_caps_present": dangerous_caps_present,
+        "dangerous_bind_path": dangerous_bind_path,
+        "no_new_privileges_missing": no_new_privileges_missing,
+        "apparmor_disabled": apparmor_disabled,
+        "mount_propagation_shared": mount_propagation_shared,
     }
 
 

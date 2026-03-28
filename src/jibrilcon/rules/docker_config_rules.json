@@ -230,6 +230,90 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "dangerous_bind_path",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Container mounts a dangerous host path",
+      "risk": "Mounting sensitive host paths (/, /proc, /sys, /dev, /etc, docker.sock) breaks container isolation and enables container escape, credential theft, or full host compromise.",
+      "remediation": "Remove bind mounts for sensitive paths. Use named volumes or tmpfs instead.",
+      "references": {
+        "mitre_attack": ["T1611", "T1552"],
+        "cis_docker_benchmark": ["5.5"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "dangerous_bind_path",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "no_new_privileges_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "no-new-privileges security option is not set",
+      "risk": "Without no-new-privileges, processes inside the container can gain more privileges than their parent via setuid binaries or kernel exploits.",
+      "remediation": "Add '--security-opt no-new-privileges' when starting the container.",
+      "references": {
+        "mitre_attack": ["T1548"],
+        "cis_docker_benchmark": ["5.25"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "no_new_privileges_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "mount_propagation_shared",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Bind mount uses shared or rshared propagation",
+      "risk": "Shared mount propagation allows mounts created inside the container to propagate to the host filesystem. An attacker can mount filesystems on the host from within the container, enabling container escape.",
+      "remediation": "Remove shared/rshared propagation from bind mounts. Use private or slave propagation instead.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.12"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "mount_propagation_shared",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "image_tag_latest",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Container image uses :latest tag or has no explicit tag",
+      "risk": "Without a pinned image tag or digest, the container may run a different image version on each restart. An attacker who compromises the registry can push a malicious image with the same tag.",
+      "remediation": "Use a specific image tag and ideally a digest (e.g., image:v1.2.3@sha256:abc...).",
+      "references": {
+        "mitre_attack": ["T1525", "T1195.002"],
+        "cis_docker_benchmark": ["5.8"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "image_tag_latest",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

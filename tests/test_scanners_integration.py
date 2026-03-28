@@ -28,12 +28,13 @@ class TestDockerScanner:
         cid = "aaa" * 8 + "0" * 40
         r.add_docker_container(
             cid,
-            config_v2={"Name": "/clean"},
+            config_v2={"Name": "/clean", "Config": {"Image": "myapp:v1.0"}},
             hostconfig={
                 "Privileged": False,
                 "ReadonlyRootfs": True,
                 "Binds": ["/data:/data:ro"],
                 "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
             },
         )
         ctx = _make_context()
@@ -203,12 +204,13 @@ class TestDockerScanner:
         cid = "fff" * 8 + "0" * 40
         r.add_docker_container(
             cid,
-            config_v2={"Name": "/roextra"},
+            config_v2={"Name": "/roextra", "Config": {"Image": "myapp:v1.0"}},
             hostconfig={
                 "Privileged": False,
                 "ReadonlyRootfs": True,
                 "Binds": ["/data:/data:ro,rslave"],
                 "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
             },
         )
         ctx = _make_context()
@@ -475,7 +477,7 @@ class TestDockerScanner:
         cid = "hrd" * 8 + "0" * 40
         r.add_docker_container(
             cid,
-            config_v2={"Name": "/hardened"},
+            config_v2={"Name": "/hardened", "Config": {"Image": "myapp:v1.2.3"}},
             hostconfig={
                 "Privileged": False,
                 "ReadonlyRootfs": True,
@@ -488,6 +490,7 @@ class TestDockerScanner:
                 "SecurityOpt": [
                     "apparmor=docker-default",
                     "seccomp=/path/to/profile.json",
+                    "no-new-privileges",
                 ],
             },
         )
@@ -497,6 +500,104 @@ class TestDockerScanner:
         assert len(containers) == 1
         assert containers[0]["status"] == "clean"
         assert containers[0]["violations"] == []
+
+    def test_dangerous_bind_path_docker_sock(self, make_rootfs):
+        r = make_rootfs
+        cid = "dbs" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/dind"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/var/run/docker.sock:/var/run/docker.sock"],
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_bind_path" in vio_ids
+
+    def test_no_new_privileges_missing(self, make_rootfs):
+        r = make_rootfs
+        cid = "nnp" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/nonnp"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": [],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "no_new_privileges_missing" in vio_ids
+
+    def test_no_new_privileges_set_not_flagged(self, make_rootfs):
+        r = make_rootfs
+        cid = "nnp" * 8 + "1" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/nnpok", "Config": {"Image": "app:v1"}},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "no_new_privileges_missing" not in vio_ids
+
+    def test_mount_propagation_shared(self, make_rootfs):
+        r = make_rootfs
+        cid = "mps" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/shared"},
+            hostconfig={
+                "Privileged": False,
+                "Binds": ["/data:/data:rw,rshared"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_propagation_shared" in vio_ids
+
+    def test_image_tag_latest(self, make_rootfs):
+        r = make_rootfs
+        cid = "itl" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/latest", "Config": {"Image": "nginx:latest"}},
+            hostconfig={"Privileged": False, "Binds": []},
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "image_tag_latest" in vio_ids
+
+    def test_image_tag_pinned_not_flagged(self, make_rootfs):
+        r = make_rootfs
+        cid = "itp" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/pinned", "Config": {"Image": "nginx:1.25.3"}},
+            hostconfig={"Privileged": False, "Binds": []},
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "image_tag_latest" not in vio_ids
 
 
 # ------------------------------------------------------------------ #
@@ -537,6 +638,8 @@ class TestPodmanScanner:
                 "root": {"path": "rootfs", "readonly": True},
                 "process": {
                     "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                    "apparmorProfile": "runtime/default",
                     "capabilities": {
                         "bounding": ["CAP_NET_BIND_SERVICE"],
                         "effective": ["CAP_NET_BIND_SERVICE"],
@@ -1013,6 +1116,94 @@ class TestPodmanScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "readonly_rootfs_missing" in vio_ids
 
+    def test_dangerous_bind_path_proc(self, make_rootfs):
+        r = make_rootfs
+        cid = "dbp" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "dangerousbind",
+            {
+                "process": {"user": {"uid": 1000}},
+                "mounts": [
+                    {"type": "bind", "source": "/proc", "destination": "/host-proc"},
+                ],
+                "linux": {
+                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_bind_path" in vio_ids
+
+    def test_no_new_privileges_missing_podman(self, make_rootfs):
+        r = make_rootfs
+        cid = "nnp" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "nonnp",
+            {
+                "process": {"user": {"uid": 1000}},
+                "mounts": [],
+                "linux": {
+                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "no_new_privileges_missing" in vio_ids
+
+    def test_apparmor_disabled_podman(self, make_rootfs):
+        r = make_rootfs
+        cid = "aap" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "aa-unconfined",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "apparmorProfile": "unconfined",
+                },
+                "mounts": [],
+                "linux": {
+                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "apparmor_disabled" in vio_ids
+
+    def test_mount_propagation_shared_podman(self, make_rootfs):
+        r = make_rootfs
+        cid = "mps" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "shared-mount",
+            {
+                "process": {"user": {"uid": 1000}},
+                "mounts": [
+                    {
+                        "type": "bind",
+                        "source": "/data",
+                        "destination": "/data",
+                        "options": ["rw", "rshared"],
+                    },
+                ],
+                "linux": {
+                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_propagation_shared" in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # LXC scanner
@@ -1026,6 +1217,8 @@ class TestLxcScanner:
         "lxc.idmap = g 0 100000 65536\n"
         "lxc.cap.drop = sys_admin net_raw\n"
         "lxc.net.0.type = veth\n"
+        "lxc.no_new_privs = 1\n"
+        "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
     )
 
     _MISSING_IDMAP_CONFIG = (
@@ -1331,6 +1524,98 @@ class TestLxcScanner:
         ][0]
         assert usr_vio["severity"] == 5.5
         assert usr_vio["type"] == "warning"
+
+    def test_no_new_privs_missing_lxc(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config(
+            "nonnp",
+            "lxc.rootfs.path = /var/lib/lxc/nonnp/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n",
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "no_new_privs_missing" in vio_ids
+
+    def test_no_new_privs_set_not_flagged_lxc(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config(
+            "nnpok",
+            "lxc.rootfs.path = /var/lib/lxc/nnpok/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.no_new_privs = 1\n",
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "no_new_privs_missing" not in vio_ids
+
+    def test_seccomp_profile_missing_lxc(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config(
+            "noseccomp",
+            "lxc.rootfs.path = /var/lib/lxc/noseccomp/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n",
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "seccomp_profile_missing" in vio_ids
+
+    def test_seccomp_profile_set_not_flagged_lxc(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config(
+            "seccomp-ok",
+            "lxc.rootfs.path = /var/lib/lxc/seccomp-ok/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n",
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "seccomp_profile_missing" not in vio_ids
+
+    def test_cap_keep_dangerous_lxc(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config(
+            "capkeep",
+            "lxc.rootfs.path = /var/lib/lxc/capkeep/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.keep = sys_admin net_bind_service\n"
+            "lxc.net.0.type = veth\n",
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cap_keep_dangerous" in vio_ids
+
+    def test_cap_keep_safe_not_flagged_lxc(self, make_rootfs):
+        r = make_rootfs
+        r.add_lxc_config(
+            "capkeep-ok",
+            "lxc.rootfs.path = /var/lib/lxc/capkeep-ok/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.keep = net_bind_service chown\n"
+            "lxc.net.0.type = veth\n",
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cap_keep_dangerous" not in vio_ids
 
 
 # ------------------------------------------------------------------ #

@@ -209,6 +209,90 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "dangerous_bind_path",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Container mounts a dangerous host path",
+      "risk": "Mounting sensitive host paths (/, /proc, /sys, /dev, /etc, container engine sockets) breaks container isolation and enables container escape, credential theft, or full host compromise.",
+      "remediation": "Remove bind mounts for sensitive paths. Use named volumes or tmpfs instead.",
+      "references": {
+        "mitre_attack": ["T1611", "T1552"],
+        "cis_docker_benchmark": ["5.5"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "dangerous_bind_path",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "no_new_privileges_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "noNewPrivileges is not enabled in the OCI runtime spec",
+      "risk": "Without noNewPrivileges, processes inside the container can gain more privileges than their parent via setuid binaries or kernel exploits.",
+      "remediation": "Set process.noNewPrivileges to true in the OCI runtime spec, or use --security-opt no-new-privileges at container creation.",
+      "references": {
+        "mitre_attack": ["T1548"],
+        "cis_docker_benchmark": ["5.25"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "no_new_privileges_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apparmor_disabled",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "AppArmor profile is set to unconfined",
+      "risk": "Disabling AppArmor removes mandatory access control enforcement, allowing the container process unrestricted access to system resources within its namespace.",
+      "remediation": "Remove unconfined AppArmor profile. Use the default profile or provide a custom profile tailored to the workload.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.26"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apparmor_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "mount_propagation_shared",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Bind mount uses shared or rshared propagation",
+      "risk": "Shared mount propagation allows mounts created inside the container to propagate to the host filesystem. An attacker can mount filesystems on the host from within the container, enabling container escape.",
+      "remediation": "Remove shared/rshared propagation from mount options. Use private or slave propagation instead.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.12"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "mount_propagation_shared",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

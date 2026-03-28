@@ -62,6 +62,21 @@ _DANGEROUS_CAPS = frozenset(
     }
 )
 
+_DANGEROUS_BIND_PATHS = frozenset(
+    {
+        "/",
+        "/proc",
+        "/sys",
+        "/dev",
+        "/etc",
+        "/root",
+        "/home",
+        "/var/run/docker.sock",
+        "/run/containerd/containerd.sock",
+        "/var/run/crio/crio.sock",
+    }
+)
+
 # Map rule field names to JSON keys (for pretty printing if needed)
 _FIELD_TO_CONFIG_KEY = {
     "privileged": "HostConfig.Privileged",
@@ -75,6 +90,10 @@ _FIELD_TO_CONFIG_KEY = {
     "dangerous_caps_added": "HostConfig.CapAdd",
     "cap_drop_missing": "HostConfig.CapDrop",
     "apparmor_disabled": "HostConfig.SecurityOpt",
+    "dangerous_bind_path": "HostConfig.Binds",
+    "no_new_privileges_missing": "HostConfig.SecurityOpt",
+    "mount_propagation_shared": "HostConfig.Binds",
+    "image_tag_latest": "Config.Image",
 }
 
 
@@ -205,6 +224,47 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     # AppArmor disabled
     apparmor_disabled = any(str(o) == "apparmor=unconfined" for o in sec_opts)
 
+    # --- Dangerous bind paths ---
+    def _bind_src(b: str) -> str:
+        return str(b).split(":")[0]
+
+    dangerous_bind_path = any(
+        _bind_src(b) in _DANGEROUS_BIND_PATHS
+        for b in binds
+    )
+
+    # --- no-new-privileges ---
+    no_new_privileges_missing = not any(
+        str(o) == "no-new-privileges" or str(o) == "no-new-privileges=true"
+        for o in sec_opts
+    )
+
+    # --- Mount propagation shared/rshared ---
+    # Docker bind format: src:dst[:opts] where opts can include
+    # propagation modes like "shared", "rshared", "slave", etc.
+    def _has_shared_propagation(b: str) -> bool:
+        parts = str(b).split(":")
+        if len(parts) < 3:
+            return False
+        opts = parts[2].split(",")
+        return "shared" in opts or "rshared" in opts
+
+    mount_propagation_shared = any(
+        _has_shared_propagation(b) for b in binds
+    )
+
+    # --- Image tag :latest or missing ---
+    image = cfg.get("Config", {}).get("Image", "") or cfg.get("Image", "")
+    if isinstance(image, str) and image:
+        img_no_digest = image.split("@")[0]
+        if ":" not in img_no_digest:
+            image_tag_latest = True
+        else:
+            tag = img_no_digest.rsplit(":", 1)[-1]
+            image_tag_latest = tag == "latest"
+    else:
+        image_tag_latest = True
+
     return {
         "privileged": privileged,
         "readonly_rootfs": readonly_rootfs,
@@ -216,6 +276,10 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         "dangerous_caps_added": dangerous_caps_added,
         "cap_drop_missing": cap_drop_missing,
         "apparmor_disabled": apparmor_disabled,
+        "dangerous_bind_path": dangerous_bind_path,
+        "no_new_privileges_missing": no_new_privileges_missing,
+        "mount_propagation_shared": mount_propagation_shared,
+        "image_tag_latest": image_tag_latest,
     }
 
 

@@ -60,6 +60,19 @@ MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB safeguard
 
 _MAX_INCLUDE_DEPTH = 20
 
+_DANGEROUS_CAPS_KEEP = frozenset(
+    {
+        "sys_admin",
+        "sys_ptrace",
+        "sys_module",
+        "net_raw",
+        "net_admin",
+        "sys_rawio",
+        "dac_override",
+        "dac_read_search",
+    }
+)
+
 # Map rule field name -> config key (for pretty reporting if needed)
 _FIELD_TO_CONFIG_KEY = {
     "uidmap": "lxc.idmap",
@@ -69,6 +82,9 @@ _FIELD_TO_CONFIG_KEY = {
     "options": "lxc.mount.entry",
     "apparmor_profile": "lxc.apparmor.profile",
     "net_type": "lxc.net.0.type",
+    "no_new_privs_missing": "lxc.no_new_privs",
+    "seccomp_profile_missing": "lxc.seccomp.profile",
+    "cap_keep_dangerous": "lxc.cap.keep",
 }
 
 # ---------------------------------------------------------------------
@@ -323,6 +339,39 @@ def _extract_net_type(entries: dict[str, list[str]]) -> dict[str, str | None]:
     return {"net_type": net_type}
 
 
+def _extract_no_new_privs(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if lxc.no_new_privs is set to 1."""
+    vals = entries.get("lxc.no_new_privs", [])
+    enabled = any(v.strip() == "1" for v in vals if isinstance(v, str))
+    return {"no_new_privs_missing": not enabled}
+
+
+def _extract_seccomp_profile(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if lxc.seccomp.profile is configured."""
+    # LXC supports both lxc.seccomp.profile (v3) and lxc.seccomp (v2)
+    vals = entries.get("lxc.seccomp.profile", []) + entries.get(
+        "lxc.seccomp", []
+    )
+    has_profile = any(
+        isinstance(v, str) and v.strip() for v in vals
+    )
+    return {"seccomp_profile_missing": not has_profile}
+
+
+def _extract_cap_keep(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if lxc.cap.keep contains dangerous capabilities."""
+    keeps: list[str] = []
+    for val in entries.get("lxc.cap.keep", []):
+        if not isinstance(val, str):
+            continue
+        stripped = val.strip()
+        if stripped:
+            keeps.extend(stripped.lower().split())
+    normalised = {k.removeprefix("cap_") for k in keeps}
+    dangerous = bool(normalised & _DANGEROUS_CAPS_KEEP)
+    return {"cap_keep_dangerous": dangerous}
+
+
 def _parse_mount_entry(entry: str) -> dict[str, str]:
     """
     Given a single ``lxc.mount.entry`` line, return mapping:
@@ -406,6 +455,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
         capdrop_info = _extract_cap_drop(entries)
         apparmor_info = _extract_apparmor_profile(entries)
         net_info = _extract_net_type(entries)
+        privs_info = _extract_no_new_privs(entries)
+        seccomp_info = _extract_seccomp_profile(entries)
+        capkeep_info = _extract_cap_keep(entries)
 
         # infer runs_as_root from context or missing mappings
         systemd_root = context.is_systemd_started(
@@ -421,6 +473,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
             **capdrop_info,
             **apparmor_info,
             **net_info,
+            **privs_info,
+            **seccomp_info,
+            **capkeep_info,
             "runs_as_root": runs_as_root,
         }
 
