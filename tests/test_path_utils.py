@@ -1,8 +1,5 @@
 """Tests for util/path_utils.py."""
 
-import os
-from pathlib import Path
-
 import pytest
 
 from jibrilcon.util.path_utils import resolve_path, safe_join

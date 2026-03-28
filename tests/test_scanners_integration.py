@@ -3,8 +3,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from jibrilcon.util.context import ScanContext
 from jibrilcon.scanners import docker_native, lxc, podman
 

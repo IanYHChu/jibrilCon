@@ -1,7 +1,6 @@
 """Shared pytest fixtures for jibrilcon tests."""
 
 import json
-import os
 from pathlib import Path
 
 import pytest

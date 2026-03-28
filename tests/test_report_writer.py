@@ -1,9 +1,6 @@
 """Tests for report_writer and summary_utils."""
 import gzip
 import json
-from pathlib import Path
-
-import pytest
 
 from jibrilcon.util.report_writer import write_report
 from jibrilcon.util.summary_utils import generate_final_report

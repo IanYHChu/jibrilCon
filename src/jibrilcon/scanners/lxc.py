@@ -31,7 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from jibrilcon.util.config_loader import load_json_config
+from jibrilcon.util.config_loader import ConfigLoadError, load_json_config
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.path_utils import safe_join
@@ -57,6 +57,8 @@ _DEFINE_RE = re.compile(
 _EXCLUDE_DIRS = {"/dev", "/proc", "/run", "/sys", "/tmp", "/mnt", "/media"}
 
 MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB safeguard
+
+_MAX_INCLUDE_DEPTH = 20
 
 # Map rule field name -> config key (for pretty reporting if needed)
 _FIELD_TO_CONFIG_KEY = {
@@ -87,12 +89,16 @@ def _file_contains_rootfs(
     path: Path,
     rootfs: str,
     visited: Set[Path] | None = None,
+    depth: int = 0,
 ) -> bool:
     """
     Recursively check if *path* (and its included configs) define
     ``lxc.rootfs.path``.  Included paths are resolved within the
     *rootfs* boundary to prevent symlink traversal.
     """
+    if depth > _MAX_INCLUDE_DEPTH:
+        logger.warning("Include depth exceeded %d at %s", _MAX_INCLUDE_DEPTH, path)
+        return False
     visited = visited or set()
     if path in visited:
         return False  # circular include
@@ -117,7 +123,7 @@ def _file_contains_rootfs(
                     inc_path = safe_join(rootfs, rel)
             except ValueError:
                 continue  # include escapes rootfs, skip
-            if _file_contains_rootfs(inc_path, rootfs, visited):
+            if _file_contains_rootfs(inc_path, rootfs, visited, depth + 1):
                 return True
     return False
 
@@ -150,8 +156,7 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
             try:
                 if _file_contains_rootfs(full, rootfs):
                     configs.add(full)
-            except Exception:
-                # ignore unreadable files
+            except (OSError, ValueError, UnicodeDecodeError):
                 continue
     return configs
 
@@ -322,7 +327,12 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
     if context is None:
         raise ValueError("ScanContext must be supplied by core.run_scan")
 
-    all_rules = load_json_config(RULE_PATH).get("rules", [])
+    try:
+        rules_cfg = load_json_config(RULE_PATH)
+    except ConfigLoadError:
+        logger.error("Failed to load LXC rules from %s", RULE_PATH)
+        rules_cfg = {"rules": []}
+    all_rules = rules_cfg.get("rules", [])
     if not all_rules:
         logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
     config_rules = [r for r in all_rules if not r["id"].startswith("mount_")]

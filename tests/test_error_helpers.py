@@ -1,7 +1,6 @@
 """Tests for util/error_helpers.py."""
 
 import json
-from pathlib import Path
 
 import pytest
 

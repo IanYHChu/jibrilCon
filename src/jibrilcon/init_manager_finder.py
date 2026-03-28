@@ -25,9 +25,7 @@ Public helpers
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
-from typing import Optional
 
 from jibrilcon.util.path_utils import resolve_path
 

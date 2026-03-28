@@ -1,7 +1,5 @@
 """Tests for util/systemd_unit_parser.py."""
 
-from pathlib import Path
-
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.systemd_unit_parser import (
     _parse_unit_lines,
@@ -133,9 +131,9 @@ def test_collect_caches_execstartpre(tmp_path):
 
     lines = ctx.get_exec_lines("lxc", "myct")
     # Both ExecStart and ExecStartPre must be present
-    assert any("-f /custom/config" in l for l in lines), (
+    assert any("-f /custom/config" in line for line in lines), (
         "ExecStartPre lines should be cached"
     )
-    assert any("-d" in l for l in lines), (
+    assert any("-d" in line for line in lines), (
         "ExecStart lines should be cached"
     )

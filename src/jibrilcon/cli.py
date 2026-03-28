@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 from jibrilcon.util.logging_utils import init_logging
 import sys
@@ -108,20 +109,28 @@ def main() -> None:
 
     # 1. Initialisation – must precede any scanner import that might log
     init_logging(args.log_level)
+    logger = logging.getLogger(__name__)
 
-    # 2. Run full scan – core.run_scan already returns the *final* report
-    report = run_scan(args.mount_path, max_workers=args.max_workers)
+    try:
+        # 2. Run full scan – core.run_scan already returns the *final* report
+        report = run_scan(args.mount_path, max_workers=args.max_workers)
 
-    # 3. Output
-    if args.output:
-        write_report(report, args.output)  # supports .json /.json.gz
-        print(f"Report written to {args.output}")
-    else:
-        print(json.dumps(report, indent=2))
+        # 3. Output
+        if args.output:
+            write_report(report, args.output)  # supports .json /.json.gz
+            print(f"Report written to {args.output}")
+        else:
+            print(json.dumps(report, indent=2))
 
-    # 4. Colour summary (same behaviour as legacy CLI)
-    if "summary" in report:
-        _print_summary(report["summary"], use_color=not args.no_color)
+        # 4. Colour summary (same behaviour as legacy CLI)
+        if "summary" in report:
+            _print_summary(report["summary"], use_color=not args.no_color)
+    except KeyboardInterrupt:
+        sys.exit("Interrupted by user")
+    except Exception as exc:
+        logger.error("Scan failed: %s", exc, exc_info=True)
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------

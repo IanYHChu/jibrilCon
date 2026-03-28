@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from jibrilcon.util.path_utils import resolve_path, safe_join
-from jibrilcon.util.config_loader import load_json_config
+from jibrilcon.util.config_loader import ConfigLoadError, load_json_config
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
@@ -179,7 +179,12 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
     if context is None:
         raise ValueError("ScanContext must be supplied by core.run_scan")
 
-    rules = load_json_config(RULE_PATH).get("rules", [])
+    try:
+        rules_cfg = load_json_config(RULE_PATH)
+    except ConfigLoadError:
+        logger.error("Failed to load Podman rules from %s", RULE_PATH)
+        rules_cfg = {"rules": []}
+    rules = rules_cfg.get("rules", [])
     if not rules:
         logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
     containers: Dict[str, Dict[str, Any]] = {}

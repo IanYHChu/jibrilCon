@@ -189,7 +189,14 @@ def collect_systemd_containers(
         • mark_user_missing()
         • add_exec_lines()      (ExecStart / ExecStartPre)
     """
-    rows = scan_systemd_container_units(rootfs, filters_path=filters_path)
+    try:
+        rows = scan_systemd_container_units(rootfs, filters_path=filters_path)
+    except RuntimeError:
+        logger.error(
+            "Failed to load systemd filters from %s; skipping systemd collection",
+            filters_path or _DEFAULT_FILTER_FILE,
+        )
+        return
 
     for row in rows:
         engine = row.get("engine") or ""

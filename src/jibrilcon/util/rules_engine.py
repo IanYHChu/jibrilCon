@@ -137,7 +137,7 @@ def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
 
     try:
         return func(actual, expected)
-    except Exception as exc:  # pylint: disable=broad-except
+    except (TypeError, AttributeError, ValueError, KeyError) as exc:
         logger.error("Condition evaluation error: %s", exc, exc_info=True)
         return False
 
