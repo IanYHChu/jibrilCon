@@ -103,8 +103,11 @@ def detect_init_system(rootfs: Path | str) -> str:
     rootfs_str = str(root)
     for rel in _CANDIDATE_BINARIES:
         p = root / rel
-        if not p.exists(follow_symlinks=False) and not p.exists():
-            continue
+        try:
+            p.lstat()
+        except OSError:
+            if not p.exists():
+                continue
         # Resolve symlinks within rootfs boundary
         try:
             resolved = Path(resolve_path(str(p), rootfs_str))
