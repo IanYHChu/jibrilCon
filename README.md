@@ -1,123 +1,197 @@
 # jibrilcon
 
-**jibrilcon** is a static risk scanner for embedded Linux systems packaged 
-as root filesystem images (ext4, squashfs, etc.). It inspects a *mounted* 
-root filesystem, detects container services started at boot, and evaluates 
-their configurations against rule-based policies – 
+**jibrilcon** is a static risk scanner for embedded Linux systems packaged
+as root filesystem images (ext4, squashfs, etc.). It inspects a *mounted*
+root filesystem, detects container services started at boot, and evaluates
+their configurations against rule-based policies --
 **no chroot, no QEMU, no runtime execution**.
 
 ---
 
 ## Key Features
 
-| Area                      | Details |
-| ------------------------- | ------- |
-| Init discovery            | `systemd`, `sysvinit`, `openrc` (heuristic ELF scan) |
-| Container runtimes        | **Docker**, **Podman**, **LXC**<br>(K8s / K3s coming soon) |
-| Rule engine               | JSON DSL – `equals`, `regex_match`, `gt`, `exists`, … |
-| Parallel scanning         | Thread-pool executes scanners concurrently |
-| Output formats            | Pretty JSON or Gzip-compressed JSON |
-| Zero runtime dependency   | Reads files only; nothing inside the image is executed |
+| Area | Details |
+| --- | --- |
+| Init discovery | `systemd`, `sysvinit`, `openrc` (heuristic ELF scan) |
+| Container runtimes | **Docker**, **Podman**, **LXC** |
+| Rule engine | JSON DSL with 14 operators (`equals`, `regex_match`, `not_regex_match`, `gt`, `exists`, ...) |
+| Framework mapping | MITRE ATT&CK, CIS Docker Benchmark, NIST SP 800-190 |
+| Parallel scanning | Thread-pool executes scanners concurrently |
+| Output formats | JSON or Gzip-compressed JSON |
+| Zero runtime dependency | Reads files only; nothing inside the image is executed |
 
 ---
 
 ## Why jibrilcon?
 
-Embedded Linux systems often have strong hardware dependencies, making it difficult even impractical to run the system image in a simulated host environment. Requiring full system boot just to analyze configuration introduces unnecessary cost and complexity. **jibrilcon** uses a static analysis approach: it scans a mounted root filesystem directly, analyzing files without executing any binaries. This approach avoids runtime dependencies and minimizes impact on the host.
+Embedded Linux systems often have strong hardware dependencies, making it
+difficult or impractical to run the system image in a simulated host
+environment. Requiring full system boot just to analyze configuration
+introduces unnecessary cost and complexity. **jibrilcon** uses a static
+analysis approach: it scans a mounted root filesystem directly, analyzing
+files without executing any binaries.
 
-Additionally, embedded systems usually lack an interface for user interaction — all services are launched automatically at boot time. Instead of waiting for user-triggered actions or relying on runtime behavior, **jibrilcon** analyzes system boot configurations (e.g., systemd service files) to identify which containers are started at boot, and focuses its security analysis on those services.
-
----
-
-## What does jibrilcon do?
-
-- Mounts a Linux rootfs image on an host machine
-- Scans for insecure or privileged container configurations across:
-  - LXC
-  - Docker
-  - Podman
-- Supports JSON-based rule definitions for easy customization
-- Reports risky configurations such as:
-  - Containers running as root
-  - Dangerous or writable mounts
-  - Overuse of privileged flags or capabilities
+Additionally, embedded systems usually lack an interface for user
+interaction -- all services are launched automatically at boot time. Instead
+of relying on runtime behavior, **jibrilcon** analyzes system boot
+configurations (e.g., systemd service files) to identify which containers
+are started at boot, and focuses its security analysis on those services.
 
 ---
 
-## How it works
+## Installation
 
-1. You mount your embedded Linux rootfs (e.g., at `/mnt/target-rootfs`)
-2. You run `jibrilcon` and point it to the mount path
-3. It dynamically loads all scanner modules from `scanners/`
-4. Each scanner extracts container configuration data and applies static rules
-5. A final report is generated with alerts, warnings, and summaries
-
----
-
-## Output
-
-The output is a JSON report containing:
-- Violations detected per container or service
-- Alert/warning counts by scanner
-- Summarized findings across all modules
+```bash
+# Requires Python 3.10+
+pip install -e ".[dev]"
+```
 
 ---
 
-## Example Usage
+## Usage
 
 ```bash
 # Basic scan with colored console output
-$ python3 -m jibrilcon /mnt/target-rootfs
+python3 -m jibrilcon /mnt/target-rootfs
 
-# Disable colored output (useful for logs or file redirection)
-$ python3 -m jibrilcon /mnt/target-rootfs --no-color
+# Save report as JSON
+python3 -m jibrilcon /mnt/target-rootfs -o report.json
 
-# Save report as plain JSON
-$ python3 -m jibrilcon /mnt/target-rootfs --output ./scan-report.json
+# Save report as Gzip-compressed JSON
+python3 -m jibrilcon /mnt/target-rootfs -o report.json.gz
 
-# Save report as compressed Gzip JSON
-$ python3 -m jibrilcon /mnt/target-rootfs --output ./scan-report.json.gz
+# Disable colored output (useful for CI pipelines)
+python3 -m jibrilcon /mnt/target-rootfs --no-color
+
+# Adjust scanner parallelism
+python3 -m jibrilcon /mnt/target-rootfs --max-workers 4
 ```
 
-- If `--output` ends with `.json`, the report is saved as a plain JSON file.
-- If `--output` ends with `.json.gz`, the report is saved as a Gzip-compressed JSON file.
-- If `--output` is not specified, the report is printed to the console.
-- Use `--no-color` to disable ANSI color in terminal output (useful for CI pipelines or log files).
-  - If `--output` is specified, colored console output is automatically disabled (equivalent to `--no-color`). This prevents ANSI escape codes from being written into the output file.
+If `--output` is not specified, the report is printed to stdout. Use
+`--no-color` to disable ANSI escape codes for log files or CI.
+
+---
+
+## Report Format
+
+Each violation includes actionable context and framework references:
+
+```json
+{
+  "id": "privileged",
+  "type": "alert",
+  "severity": 9.0,
+  "description": "Container is running in privileged mode",
+  "risk": "Grants full access to all host devices and disables most kernel isolation.",
+  "remediation": "Remove --privileged flag. Use --cap-add for specific capabilities.",
+  "references": {
+    "mitre_attack": ["T1611"],
+    "cis_docker_benchmark": ["5.4"],
+    "nist_800_190": ["4.4"]
+  },
+  "source": "/var/lib/docker/containers/.../config.v2.json",
+  "lines": ["HostConfig.Privileged = True"]
+}
+```
+
+### Mapped Frameworks
+
+| Framework | Coverage |
+| --- | --- |
+| [MITRE ATT&CK (Containers)](https://attack.mitre.org/matrices/enterprise/containers/) | T1611, T1078.003, T1565.001, T1003 |
+| [CIS Docker Benchmark](https://www.cisecurity.org/benchmark/docker) | Section 5 (Container Runtime) |
+| [NIST SP 800-190](https://csrc.nist.gov/publications/detail/sp/800-190/final) | Section 4.4 (Container Risks) |
+
+---
+
+## How It Works
+
+1. Mount an embedded Linux rootfs on the host (e.g., at `/mnt/target-rootfs`)
+2. **Init detection** -- identifies systemd / sysvinit / openrc via ELF heuristic
+3. **Systemd pre-collection** -- parses `.service` files to find which containers boot via systemd, caching ExecStart/ExecStartPre lines and User directives
+4. **Parallel scanning** -- dynamically loads all scanner modules (`docker_native`, `podman`, `lxc`) and runs them in a thread pool
+5. **Rule evaluation** -- each scanner extracts config fields and evaluates them against JSON rule definitions
+6. **Report generation** -- merges results into a unified report with per-container violations and summary statistics
 
 ---
 
 ## Project Structure
 
 ```
-jibrilcon/            CLI entry & orchestration
-scanners/           One module per runtime (priority-based)
-util/               Shared helpers (rules_engine, path_utils, …)
-rule/               JSON rule sets
-config/             systemd / init discovery data
+src/jibrilcon/
+  __main__.py              python -m jibrilcon entry point
+  cli.py                   Argument parsing, colored summary, report output
+  core.py                  Orchestrator: init detection -> systemd -> scanners -> report
+  init_manager_finder.py   ELF heuristic for init system detection
+
+  scanners/                One module per container runtime
+    docker_native.py       Docker (config.v2.json + hostconfig.json)
+    lxc.py                 LXC (config files + mount entries + lxc-monitord)
+    podman.py              Podman (OCI config.json + containers.json)
+
+  util/                    Shared helpers
+    rules_engine.py        JSON DSL rule engine (14 operators, and/or logic)
+    context.py             Thread-safe shared state across scanners
+    systemd_unit_parser.py Parse .service files, detect container services
+    path_utils.py          Safe symlink resolution with rootfs boundary checks
+    ...
+
+  rules/                   JSON rule definitions with framework mappings
+  config/                  Systemd unit search paths and detection patterns
 ```
 
 ---
 
 ## Extending jibrilcon
 
-Add a new runtime scanner
-  1. Create scanners/<runtime>.py
-  2. Expose:
-    ```python
-    def scan(rootfs: str, ctx: ScanContext) -> list[dict]: ...
-    ```
-  3. Add rule/<runtime>_rules.json with your policies.
+### Add a new runtime scanner
 
-Add a new rule operator
-  1. Implement a _myop(a, b) -> bool helper in util/rules_engine.py.
-  2. Register it in _OPERATOR_MAP.
-  3. Add unit tests and docs.
+1. Create `src/jibrilcon/scanners/<runtime>.py`
+2. Expose:
+   ```python
+   def scan(mount_path: str, context: ScanContext) -> dict: ...
+   ```
+3. Add `src/jibrilcon/rules/<runtime>_config_rules.json` with rule definitions
+
+### Add a new rule operator
+
+1. Implement `_myop(a, b) -> bool` in `src/jibrilcon/util/rules_engine.py`
+2. Register it in `_OPERATOR_MAP`
+
+### Add framework mappings to a rule
+
+Include these optional fields in any rule definition:
+
+```json
+{
+  "severity": 7.0,
+  "risk": "Why this is dangerous",
+  "remediation": "How to fix it",
+  "references": {
+    "mitre_attack": ["T1611"],
+    "cis_docker_benchmark": ["5.4"],
+    "nist_800_190": ["4.4"]
+  }
+}
+```
 
 ---
 
-## Roadmap
+## Development
 
-  - Kubernetes / K3s manifest scanner
-  - YAML rule syntax with logical operators
-  - SBOM correlation (packages ↔ containers)
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+python3 -m pytest tests/ -v
+
+# Lint
+ruff check src/ tests/
+```
+
+---
+
+## License
+
+Apache License 2.0 -- see [LICENSE](LICENSE).
