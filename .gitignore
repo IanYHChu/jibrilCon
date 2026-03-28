@@ -15,9 +15,17 @@ venv/
 # Environment variables
 .env
 
-# Editor temp files
+# Editor and IDE
 **/*.bak
 **/*~
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # Tool caches
 .pytest_cache/
@@ -27,6 +35,7 @@ venv/
 # Coverage
 .coverage
 htmlcov/
+coverage.xml
 
 # Claude Code local state
 .claude/

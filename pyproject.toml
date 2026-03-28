@@ -62,5 +62,8 @@ exclude_lines = [
     "pragma: no cover",
 ]
 
+[tool.bandit]
+exclude_dirs = ["tests"]
+
 [tool.ruff]
 target-version = "py310"
