@@ -28,12 +28,12 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from util.context import ScanContext
+from jibrilcon.util.context import ScanContext
 from jibrilcon.init_manager_finder import detect_init_system
 
-from util.systemd_unit_parser import collect_systemd_containers
-from util.scanner_loader import run_scanners
-from util.summary_utils import generate_final_report
+from jibrilcon.util.systemd_unit_parser import collect_systemd_containers
+from jibrilcon.util.scanner_loader import run_scanners
+from jibrilcon.util.summary_utils import generate_final_report
 
 logger = logging.getLogger(__name__)
 

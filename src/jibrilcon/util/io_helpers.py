@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
-from util.error_helpers import load_json_safe, SoftIOError
+from jibrilcon.util.error_helpers import load_json_safe, SoftIOError
 
 
 def deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:

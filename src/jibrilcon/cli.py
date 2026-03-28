@@ -25,12 +25,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from util.logging_utils import init_logging
+from jibrilcon.util.logging_utils import init_logging
 import sys
 from typing import Dict
 
 from jibrilcon.core import run_scan
-from util.report_writer import write_report  # handles .json or .json.gz
+from jibrilcon.util.report_writer import write_report  # handles .json or .json.gz
 
 # ---------------------------------------------------------------------
 # CLI helpers

@@ -28,18 +28,18 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from util.path_utils import resolve_path, safe_join
-from util.config_loader import load_json_config
-from util.context import ScanContext
-from util.rules_engine import evaluate_rules
-from util.io_helpers import deep_merge, load_json_or_empty
+from jibrilcon.util.path_utils import resolve_path, safe_join
+from jibrilcon.util.config_loader import load_json_config
+from jibrilcon.util.context import ScanContext
+from jibrilcon.util.rules_engine import evaluate_rules
+from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
 
 # ---------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-RULE_PATH = BASE_DIR.parent / "rule" / "docker_config_rules.json"
+RULE_PATH = BASE_DIR.parent / "rules" / "docker_config_rules.json"
 
 _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 

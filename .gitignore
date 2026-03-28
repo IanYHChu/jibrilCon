@@ -1,6 +1,6 @@
-/*.sh
-/sample
 /*.zip
 **/__pycache__/
 **/*.bak
 **/*~
+*.egg-info/
+/tests/fixtures/

@@ -24,7 +24,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from util.context import ScanContext
+from jibrilcon.util.context import ScanContext
 
 logger = logging.getLogger(__name__)
 

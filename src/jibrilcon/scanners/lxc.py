@@ -30,18 +30,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from util.config_loader import load_json_config
-from util.context import ScanContext
-from util.rules_engine import evaluate_rules
-from util.path_utils import safe_join
-from util.systemd_unit_parser import scan_systemd_container_units
+from jibrilcon.util.config_loader import load_json_config
+from jibrilcon.util.context import ScanContext
+from jibrilcon.util.rules_engine import evaluate_rules
+from jibrilcon.util.path_utils import safe_join
+from jibrilcon.util.systemd_unit_parser import scan_systemd_container_units
 
 # ---------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-RULE_PATH = BASE_DIR.parent / "rule" / "lxc_config_rules.json"
+RULE_PATH = BASE_DIR.parent / "rules" / "lxc_config_rules.json"
 
 # Regex patterns
 _IDMAP_RE = re.compile(r"^([ug])\s+(\d+)\s+(\d+)\s+(\d+)")

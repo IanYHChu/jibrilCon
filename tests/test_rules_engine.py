@@ -2,7 +2,7 @@
 
 import copy
 
-from util.rules_engine import evaluate_rules
+from jibrilcon.util.rules_engine import evaluate_rules
 
 
 # ------------------------------------------------------------------ #

@@ -2,30 +2,25 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Ensure project root is on sys.path so imports work
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 
 @pytest.fixture
 def rule_dir():
-    """Return the path to the rule/ directory."""
-    return PROJECT_ROOT / "rule"
+    """Return the path to the rules/ directory."""
+    return PROJECT_ROOT / "src" / "jibrilcon" / "rules"
 
 
 @pytest.fixture
-def sample_dir():
-    """Return the path to sample/ if it exists, else skip."""
-    d = PROJECT_ROOT / "sample"
+def fixtures_dir():
+    """Return the path to tests/fixtures/ if it exists, else skip."""
+    d = PROJECT_ROOT / "tests" / "fixtures"
     if not d.is_dir():
-        pytest.skip("sample/ directory not available")
+        pytest.skip("tests/fixtures/ directory not available")
     return d
 
 

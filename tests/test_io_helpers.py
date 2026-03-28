@@ -2,7 +2,7 @@
 
 import json
 
-from util.io_helpers import deep_merge, load_json_or_empty
+from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
 
 
 # ------------------------------------------------------------------ #

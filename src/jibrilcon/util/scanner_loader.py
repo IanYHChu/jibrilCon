@@ -23,7 +23,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List
 
-from util.context import ScanContext
+from jibrilcon.util.context import ScanContext
 
 # ---------------------------------------------------------------------
 # Constants and logger
@@ -31,7 +31,7 @@ from util.context import ScanContext
 
 logger = logging.getLogger(__name__)
 
-_SCANNER_PKG = "scanners"
+_SCANNER_PKG = "jibrilcon.scanners"
 _SCAN_FUNC = "scan"
 # Default pool size when caller does not specify.
 _MAX_WORKERS = 8

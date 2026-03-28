@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from util.config_loader import (
+from jibrilcon.util.config_loader import (
     ConfigLoadError,
     clear_cache,
     load_json_config,

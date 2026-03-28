@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from util.context import ScanContext
-from scanners import docker_native, podman
+from jibrilcon.util.context import ScanContext
+from jibrilcon.scanners import docker_native, podman
 
 
 # ------------------------------------------------------------------ #

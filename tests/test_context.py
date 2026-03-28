@@ -1,6 +1,6 @@
 """Tests for util/context.py."""
 
-from util.context import ScanContext
+from jibrilcon.util.context import ScanContext
 
 
 def test_mark_and_query_systemd_started():
