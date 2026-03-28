@@ -64,7 +64,7 @@
       ]
     },
     {
-      "id": "missing_seccomp",
+      "id": "seccomp_disabled",
       "type": "warning",
       "severity": 6.0,
       "description": "Seccomp profile is not defined",
@@ -78,9 +78,9 @@
       "logic": "and",
       "conditions": [
         {
-          "field": "seccomp",
+          "field": "seccomp_disabled",
           "operator": "equals",
-          "value": false
+          "value": true
         }
       ]
     },

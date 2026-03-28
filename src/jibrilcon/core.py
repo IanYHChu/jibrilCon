@@ -76,5 +76,10 @@ def run_scan(
     results: List[Dict[str, object]] = run_scanners(str(mount_path), context=context, max_workers=max_workers)
 
     # 3. Build final report (filtering to blocks that contain the "scanner" key)
-    clean_results = [r for r in results if isinstance(r, dict) and r.get("scanner")]
+    clean_results = []
+    for r in results:
+        if isinstance(r, dict) and r.get("scanner"):
+            clean_results.append(r)
+        else:
+            logger.warning("Dropping malformed scanner result (missing 'scanner' key): %s", r)
     return generate_final_report(clean_results)

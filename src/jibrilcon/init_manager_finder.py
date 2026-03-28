@@ -25,8 +25,11 @@ Public helpers
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
+
+from jibrilcon.util.path_utils import resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +54,10 @@ def _elf_contains(path: Path, marker: bytes) -> bool:
     try:
         with path.open("rb") as fh:
             hdr = fh.read(16)
-            if hdr[:4] != b"\x7fELF":
+            if len(hdr) < 5 or hdr[:4] != b"\x7fELF":
                 return False
             # EI_CLASS @ byte 4 → 1 = 32-bit, 2 = 64-bit
             is_64 = hdr[4] == 2
-            # Skip to section header string table offset to bound our search
             fh.seek(0)
             data = fh.read(65536 if is_64 else 32768)
         return marker in data
@@ -96,13 +98,22 @@ def detect_init_system(rootfs: Path | str) -> str:
     root = Path(rootfs)
 
     # 1. Inspect candidate binaries
+    rootfs_str = str(root)
     for rel in _CANDIDATE_BINARIES:
         p = root / rel
-        if not p.is_file():
+        if not p.exists(follow_symlinks=False) and not p.exists():
             continue
-        if _is_systemd_binary(p):
+        # Resolve symlinks within rootfs boundary
+        try:
+            resolved = Path(resolve_path(str(p), rootfs_str))
+        except RuntimeError:
+            logger.debug("Skipping %s: symlink escapes rootfs", p)
+            continue
+        if not resolved.is_file():
+            continue
+        if _is_systemd_binary(resolved):
             return "systemd"
-        if _is_sysv_binary(p):
+        if _is_sysv_binary(resolved):
             return "sysvinit"
 
     # 2. Directory hints (fallback)

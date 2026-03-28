@@ -144,6 +144,83 @@ class TestDockerScanner:
         names = [c["container"] for c in result["results"]]
         assert "rootless" in names
 
+    def test_seccomp_disabled_warning(self, make_rootfs):
+        r = make_rootfs
+        cid = "ddd" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/noseccomp"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "SecurityOpt": ["seccomp=unconfined"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "seccomp_disabled" in vio_ids
+
+    def test_label_disable_privileged(self, make_rootfs):
+        r = make_rootfs
+        cid = "eee" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/labeldisable"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "SecurityOpt": ["label=disable"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "privileged" in vio_ids
+
+    def test_bind_mount_readonly_with_extra_options(self, make_rootfs):
+        r = make_rootfs
+        cid = "fff" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/roextra"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/data:/data:ro,rslave"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        assert containers[0]["status"] == "clean"
+
+    def test_bind_mount_writable_default(self, make_rootfs):
+        r = make_rootfs
+        cid = "ggg" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/rwdefault"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/data:/data"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "binds_not_readonly" in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # Podman scanner
@@ -217,7 +294,7 @@ class TestPodmanScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "has_cap_sys_admin" in vio_ids
 
-    def test_missing_seccomp_warning(self, make_rootfs):
+    def test_seccomp_disabled_warning(self, make_rootfs):
         r = make_rootfs
         cid = "pod" * 8 + "3" * 40
         r.add_podman_container(
@@ -235,7 +312,59 @@ class TestPodmanScanner:
         ctx = _make_context()
         result = podman.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
-        assert "missing_seccomp" in vio_ids
+        assert "seccomp_disabled" in vio_ids
+
+    def test_binds_not_readonly_warning(self, make_rootfs):
+        r = make_rootfs
+        cid = "pod" * 8 + "4" * 40
+        r.add_podman_container(
+            cid,
+            "writablebind",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": []},
+                },
+                "mounts": [
+                    {
+                        "type": "bind",
+                        "source": "/host/data",
+                        "destination": "/mnt",
+                        "options": ["nosuid", "nodev"],
+                    },
+                ],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "readonlyPaths": ["/proc"],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "binds_not_readonly" in vio_ids
+
+    def test_readonly_rootfs_missing_warning(self, make_rootfs):
+        r = make_rootfs
+        cid = "pod" * 8 + "5" * 40
+        r.add_podman_container(
+            cid,
+            "norootfs",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "readonly_rootfs_missing" in vio_ids
 
 
 # ------------------------------------------------------------------ #
@@ -321,6 +450,94 @@ class TestLxcScanner:
         assert len(containers) == 1
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "mount_proc_dangerous" in vio_ids
+
+    def test_dangerous_sys_mount(self, make_rootfs):
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/sysmnt/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.mount.entry = /sys sysfs sysfs rw 0 0\n"
+        )
+        r.add_lxc_config("sysmnt", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "mount_sys_dangerous" in vio_ids
+
+    def test_dangerous_run_mount(self, make_rootfs):
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/runmnt/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.mount.entry = /run tmpfs tmpfs rw 0 0\n"
+        )
+        r.add_lxc_config("runmnt", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "mount_run_dangerous" in vio_ids
+
+    def test_mount_usr_not_readonly(self, make_rootfs):
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/usrmnt/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.mount.entry = /usr usr none rw,bind 0 0\n"
+        )
+        r.add_lxc_config("usrmnt", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "mount_usr_should_be_ro" in vio_ids
+
+    def test_cap_drop_missing(self, make_rootfs):
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nocap/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+        )
+        r.add_lxc_config("nocap", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "cap_drop_missing" in vio_ids
+
+    def test_mount_dev_not_readonly(self, make_rootfs):
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/devmnt/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.mount.entry = /dev tmpfs tmpfs rw 0 0\n"
+        )
+        r.add_lxc_config("devmnt", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "mount_dev_should_be_ro" in vio_ids
 
 
 # ------------------------------------------------------------------ #

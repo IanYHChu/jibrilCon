@@ -13,7 +13,10 @@ The helpers here are pure functions; no shared state is kept.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
 # Internal helpers
@@ -56,7 +59,10 @@ def _merge_results_stats(total: Dict[str, Any], results: List[Dict[str, Any]]) -
         status = item.get("status")
         if status == "clean":
             clean += 1
+        elif status == "violated":
+            violated += 1
         else:
+            logger.warning("Unexpected container status '%s', counting as violated", status)
             violated += 1
     total["clean"] = total.get("clean", 0) + clean
     total["violated"] = total.get("violated", 0) + violated

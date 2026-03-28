@@ -58,7 +58,8 @@ _FIELD_TO_CONFIG_KEY = {
     "process.user.uid": "process.user.uid",
     "has_cap_sys_admin": "process.capabilities.bounding",
     "binds_not_readonly": "mounts",
-    "seccomp": "linux.seccompDefault",
+    "seccomp_disabled": "linux.seccompProfilePath",
+    "readonly_rootfs": "linux.readonlyPaths",
     "service_user_missing": "service_user_missing",
 }
 
@@ -77,9 +78,10 @@ def _get_podman_data_root(rootfs: str) -> str:
 
     with open(cfg_path, encoding="utf-8") as fh:
         for line in fh:
-            m = re.match(r'^\s*graphRoot\s*=\s*"(.*?)"', line)
+            # Match both quoted ("...") and unquoted values
+            m = re.match(r'^\s*graphRoot\s*=\s*(?:"(.*?)"|(\S+))', line)
             if m:
-                return m.group(1)
+                return m.group(1) or m.group(2)
     return "/var/lib/containers/storage"
 
 def _get_user_podman_roots(rootfs: str) -> List[str]:
@@ -129,22 +131,35 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
 def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Produce data dict for rules_engine."""
     uid = cfg.get("process", {}).get("user", {}).get("uid", 0)
+    if not isinstance(uid, int):
+        logger.warning("UID is not an integer (%s), defaulting to 0", type(uid).__name__)
+        uid = 0
+
     mounts = cfg.get("mounts", []) or []
+    if not isinstance(mounts, list):
+        logger.warning("mounts is not a list, ignoring: %s", type(mounts).__name__)
+        mounts = []
+
     ro_paths = cfg.get("linux", {}).get("readonlyPaths", [])
     caps = cfg.get("process", {}).get("capabilities", {}).get("bounding", [])
+    if not isinstance(caps, list):
+        logger.warning("capabilities.bounding is not a list, ignoring: %s", type(caps).__name__)
+        caps = []
+
     seccomp_present = "seccompProfilePath" in cfg.get("linux", {})
 
     binds_not_readonly = any(
-        m.get("type") == "bind" and "ro" not in m.get("options", []) for m in mounts
+        isinstance(m, dict) and m.get("type") == "bind" and "ro" not in m.get("options", [])
+        for m in mounts
     )
     has_cap_sys_admin = "CAP_SYS_ADMIN" in caps
-    readonly_rootfs = bool(ro_paths)  # not used by rules now but may be in future
+    readonly_rootfs = bool(ro_paths)
 
     return {
         "process.user.uid": uid,
         "has_cap_sys_admin": has_cap_sys_admin,
         "binds_not_readonly": binds_not_readonly,
-        "seccomp": seccomp_present,
+        "seccomp_disabled": not seccomp_present,
         "readonly_rootfs": readonly_rootfs,
     }
 
@@ -165,6 +180,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         raise ValueError("ScanContext must be supplied by core.run_scan")
 
     rules = load_json_config(RULE_PATH).get("rules", [])
+    if not rules:
+        logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
     containers: Dict[str, Dict[str, Any]] = {}
     alert_count = 0
     warn_count = 0
@@ -175,7 +192,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
 
         # 2) acquire Exec* command lines  -----------------
-        exec_lines: Tuple[str, ...] = context.get_exec_lines("podman", name)
+        exec_lines: List[str] = context.get_exec_lines("podman", name)
         for line in exec_lines:
             # --config <dir>
             m_cfg = _CONFIG_RE.search(line)
@@ -217,9 +234,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                             mod_data = toml.load(fp)
                         if isinstance(mod_data, dict):
                             deep_merge(cfg_json, mod_data)
-                    except Exception:  # noqa: BLE001
-                        # Gracefully ignore malformed TOML
-                        pass
+                    except (OSError, ValueError, KeyError) as exc:
+                        logger.warning("Skipping malformed module %s: %s", mod_path, exc)
         
         data = _extract_fields(cfg_json)
 

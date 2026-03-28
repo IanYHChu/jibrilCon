@@ -99,6 +99,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.max_workers < 1:
+        parser.error(f"--max-workers must be a positive integer, got {args.max_workers}")
+
     mount = Path(args.mount_path)
     if not mount.is_dir():
         parser.error(f"mount_path does not exist or is not a directory: {mount}")

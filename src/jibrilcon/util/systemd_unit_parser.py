@@ -30,15 +30,20 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 _DEFAULT_FILTER_FILE = _CONFIG_DIR / "systemd.json"
-_UNIT_RE = re.compile(r"^(\w[\w\d]+)=(.*)$")
+_UNIT_RE = re.compile(r"^(\w+)=(.*)$")
 
 
 # --------------------------------------------------------------------------- #
 # Configuration helpers
 # --------------------------------------------------------------------------- #
 def _load_filters(path: Optional[Path] = None) -> Dict[str, Any]:
-    with open(path or _DEFAULT_FILTER_FILE, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    target = path or _DEFAULT_FILTER_FILE
+    try:
+        with open(target, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        logger.error("Failed to load systemd filters from %s: %s", target, exc)
+        raise RuntimeError(f"Cannot load systemd config: {exc}") from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -75,7 +80,9 @@ def _guess_engine_and_container(
             regex = cfg.get("container_regex")
             if regex:
                 m = re.search(regex, joined, flags=re.IGNORECASE)
-                return engine, m.group(1) if m else ""
+                if m and m.lastindex and m.lastindex >= 1:
+                    return engine, m.group(1)
+                return engine, ""
             return engine, ""
     return "", ""
 

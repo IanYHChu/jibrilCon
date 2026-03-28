@@ -16,15 +16,22 @@ from typing import Any, Dict
 from jibrilcon.util.error_helpers import load_json_safe, SoftIOError
 
 
-def deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+_MAX_MERGE_DEPTH = 32
+
+
+def deep_merge(
+    dst: Dict[str, Any], src: Dict[str, Any], *, _depth: int = 0
+) -> Dict[str, Any]:
     """Recursively merge *src* into *dst*; *src* values take precedence."""
+    if _depth > _MAX_MERGE_DEPTH:
+        raise RecursionError("deep_merge exceeded maximum depth")
     for key, val in src.items():
         if (
             key in dst
             and isinstance(dst[key], dict)
             and isinstance(val, dict)
         ):
-            deep_merge(dst[key], val)
+            deep_merge(dst[key], val, _depth=_depth + 1)
         else:
             dst[key] = val
     return dst

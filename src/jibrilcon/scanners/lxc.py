@@ -22,6 +22,7 @@ scan(mount_path: str, context: ScanContext) -> dict
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shlex
@@ -35,6 +36,8 @@ from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.path_utils import safe_join
 from jibrilcon.util.systemd_unit_parser import scan_systemd_container_units
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
 # Constants
@@ -80,10 +83,15 @@ def _is_text_file(path: str) -> bool:
     except (UnicodeDecodeError, OSError):
         return False
 
-def _file_contains_rootfs(path: Path, visited: Set[Path] | None = None) -> bool:
+def _file_contains_rootfs(
+    path: Path,
+    rootfs: str,
+    visited: Set[Path] | None = None,
+) -> bool:
     """
     Recursively check if *path* (and its included configs) define
-    ``lxc.rootfs.path``.
+    ``lxc.rootfs.path``.  Included paths are resolved within the
+    *rootfs* boundary to prevent symlink traversal.
     """
     visited = visited or set()
     if path in visited:
@@ -99,8 +107,17 @@ def _file_contains_rootfs(path: Path, visited: Set[Path] | None = None) -> bool:
             return True
         if line.startswith("lxc.include"):
             _, inc = line.split("=", 1)
-            inc_path = (path.parent / inc.strip()).resolve()
-            if _file_contains_rootfs(inc_path, visited):
+            inc_raw = inc.strip()
+            # Resolve include path within rootfs boundary
+            try:
+                if os.path.isabs(inc_raw):
+                    inc_path = safe_join(rootfs, inc_raw.lstrip("/"))
+                else:
+                    rel = os.path.relpath(path.parent / inc_raw, rootfs)
+                    inc_path = safe_join(rootfs, rel)
+            except ValueError:
+                continue  # include escapes rootfs, skip
+            if _file_contains_rootfs(inc_path, rootfs, visited):
                 return True
     return False
 
@@ -131,7 +148,7 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
             # full = Path(dirpath) / fname
             full = safe_join(rootfs, os.path.relpath(Path(dirpath) / fname, rootfs))
             try:
-                if _file_contains_rootfs(full):
+                if _file_contains_rootfs(full, rootfs):
                     configs.add(full)
             except Exception:
                 # ignore unreadable files
@@ -161,7 +178,12 @@ def _filter_active_lxc_configs(configs: Set[Path], rootfs: str) -> Set[Path]:
 def _parse_lxc_config(path: Path) -> Dict[str, List[str]]:
     """Parse key = value lines into mapping key -> list[str]."""
     result: Dict[str, List[str]] = {}
-    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        logger.warning("Cannot read LXC config %s: %s", path, exc)
+        return result
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -240,11 +262,14 @@ def _extract_idmap(entries: Dict[str, List[str]]) -> Dict[str, str]:
     """Return uidmap / gidmap strings if present."""
     uidmap = gidmap = None
     for val in entries.get("lxc.idmap", []):
+        if not isinstance(val, str):
+            continue
         m = _IDMAP_RE.match(val.strip())
         if not m:
             continue
-        tag, start, size, count = m.groups()
-        mapping = f"{start} {size} {count}"
+        # lxc.idmap format: <u|g> <container_id> <host_id> <range>
+        tag, container_id, host_id, id_range = m.groups()
+        mapping = f"{container_id} {host_id} {id_range}"
         if tag == "u":
             uidmap = mapping
         else:
@@ -256,6 +281,8 @@ def _extract_cap_drop(entries: Dict[str, List[str]]) -> Dict[str, List[str]]:
     """Return list of dropped capabilities."""
     drops: List[str] = []
     for val in entries.get("lxc.cap.drop", []):
+        if not isinstance(val, str):
+            continue
         stripped = val.strip()
         if stripped:
             drops.extend(stripped.split())
@@ -267,10 +294,14 @@ def _parse_mount_entry(entry: str) -> Dict[str, str]:
     Given a single ``lxc.mount.entry`` line, return mapping:
 
         {"source": str, "options": str}
+
+    lxc.mount.entry format (fstab-style):
+        <source> <dest> <type> <options> [<dump> <pass>]
     """
     parts = entry.split("=", 1)[-1].strip().split()
     source = parts[0] if parts else ""
-    options = parts[-1] if parts else ""
+    # options are at index 3 (fstab field 4)
+    options = parts[3] if len(parts) >= 4 else ""
     return {"source": source, "options": options}
 
 
@@ -292,6 +323,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
         raise ValueError("ScanContext must be supplied by core.run_scan")
 
     all_rules = load_json_config(RULE_PATH).get("rules", [])
+    if not all_rules:
+        logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
     config_rules = [r for r in all_rules if not r["id"].startswith("mount_")]
     mount_rules = [r for r in all_rules if r["id"].startswith("mount_")]
 
@@ -361,6 +394,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
         # ------------------ mount rules -------------------
         mount_results = []
         for line in entries.get("lxc.mount.entry", []):
+            if not isinstance(line, str):
+                continue
             mentry = _parse_mount_entry(line)
             vios_raw = evaluate_rules(mentry, mount_rules)
             vios = []

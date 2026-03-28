@@ -141,9 +141,17 @@ def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
         logger.error("Condition evaluation error: %s", exc, exc_info=True)
         return False
 
+_VALID_LOGIC = {"and", "or"}
+
 def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
     """Evaluate all conditions in *rule* according to its logic."""
     logic = str(rule.get("logic", "and")).lower()
+    if logic not in _VALID_LOGIC:
+        logger.warning(
+            "Unknown logic '%s' in rule '%s', defaulting to 'and'",
+            rule.get("logic"), rule.get("id", "<unknown>"),
+        )
+        logic = "and"
     conditions = rule.get("conditions", [])
     if not conditions:
         return False
@@ -151,7 +159,6 @@ def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
 
     if logic == "or":
         return any(results)
-    # default to AND
     return all(results)
 
 # ---------------------------------------------------------------------

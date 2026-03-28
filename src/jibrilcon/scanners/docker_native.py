@@ -51,6 +51,7 @@ _FIELD_TO_CONFIG_KEY = {
     "privileged": "HostConfig.Privileged",
     "readonly_rootfs": "HostConfig.ReadonlyRootfs",
     "binds_not_readonly": "HostConfig.Binds",
+    "seccomp_disabled": "HostConfig.SecurityOpt",
     "service_user_missing": "service_user_missing",
 }
 
@@ -118,7 +119,12 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
         if not os.path.isdir(cont_dir):
             continue
 
-        for cid in os.listdir(cont_dir):
+        try:
+            cid_list = os.listdir(cont_dir)
+        except OSError as exc:
+            logger.warning("Cannot list containers in %s: %s", cont_dir, exc)
+            continue
+        for cid in cid_list:
             cdir = os.path.join(cont_dir, cid)
             cfg = os.path.join(cdir, "config.v2.json")
             host = os.path.join(cdir, "hostconfig.json")
@@ -133,7 +139,13 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
 def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]:
     """Pick out the fields needed by rules_engine."""
     sec_opts = host.get("SecurityOpt") or []
+    if not isinstance(sec_opts, list):
+        logger.warning("SecurityOpt is not a list, ignoring: %s", type(sec_opts).__name__)
+        sec_opts = []
     binds = host.get("Binds") or []
+    if not isinstance(binds, list):
+        logger.warning("Binds is not a list, ignoring: %s", type(binds).__name__)
+        binds = []
 
     # label=disable disables all MAC enforcement (SELinux/AppArmor),
     # which Docker sets automatically in --privileged mode.
@@ -141,12 +153,26 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
     privileged = _to_bool(privileged_raw)
 
     readonly_rootfs = _to_bool(host.get("ReadonlyRootfs", False))
-    binds_not_readonly = any(not str(b).endswith(":ro") for b in binds)
+    # Docker bind format: src:dst[:opts] where opts is comma-separated
+    # (e.g. "ro", "ro,rslave"). A bind is readonly if "ro" appears in opts.
+    def _bind_is_writable(b: str) -> bool:
+        parts = str(b).split(":")
+        if len(parts) < 3:
+            return True  # no options means default (rw)
+        opts = parts[2].split(",")
+        return "ro" not in opts
+
+    binds_not_readonly = any(_bind_is_writable(b) for b in binds)
+
+    seccomp_disabled = any(
+        str(o).startswith("seccomp=unconfined") for o in sec_opts
+    )
 
     return {
         "privileged": privileged,
         "readonly_rootfs": readonly_rootfs,
         "binds_not_readonly": binds_not_readonly,
+        "seccomp_disabled": seccomp_disabled,
     }
 
 
@@ -174,6 +200,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         raise ValueError("ScanContext must be supplied by core.run_scan")
 
     rules = load_json_config(RULE_PATH).get("rules", [])
+    if not rules:
+        logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
     containers: Dict[str, Dict[str, Any]] = {}
     alert_count = 0
     warn_count = 0
@@ -185,7 +213,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         host_json = load_json_or_empty(resolve_path(host_path, mount_path))
 
         # 2) acquire Exec* command lines  -----------------
-        exec_lines: Tuple[str, ...] = context.get_exec_lines("docker", name)
+        exec_lines: List[str] = context.get_exec_lines("docker", name)
         override_cfg_dir: str | None = None
         for line in exec_lines:
             m = _CONFIG_RE.search(line)

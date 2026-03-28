@@ -83,6 +83,27 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "seccomp_disabled",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Seccomp profile is explicitly disabled (seccomp=unconfined)",
+      "risk": "Without a seccomp filter, the container process can invoke any syscall the kernel allows, expanding the attack surface for kernel exploits.",
+      "remediation": "Remove '--security-opt seccomp=unconfined'. Use the default seccomp profile or provide a custom profile that restricts unnecessary syscalls.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.21"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "seccomp_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }
