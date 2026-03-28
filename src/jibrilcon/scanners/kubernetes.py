@@ -60,6 +60,7 @@ BASE_DIR = Path(__file__).resolve().parent
 RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_pod_rules.json"
 RBAC_RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_rbac_rules.json"
 INFRA_RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_infra_rules.json"
+NODE_RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_node_rules.json"
 CONFIG_PATH = BASE_DIR.parent / "config" / "kubernetes.json"
 
 _DANGEROUS_CAPS = frozenset(
@@ -681,6 +682,176 @@ _INFRA_FIELD_TO_KEY = {
 
 
 # ---------------------------------------------------------------------
+# Node / kubelet configuration extraction
+# ---------------------------------------------------------------------
+
+_NODE_CONFIG_PATHS: dict[str, list[str]] = {
+    "kubeadm": ["/var/lib/kubelet/config.yaml"],
+    "k3s": ["/etc/rancher/k3s/config.yaml"],
+    "rke2": ["/etc/rancher/rke2/config.yaml"],
+}
+
+
+def _discover_node_configs(rootfs: str) -> list[tuple[str, str]]:
+    """Find kubelet/K3s/RKE2 config files. Returns (distro, path) pairs."""
+    distros = _detect_k8s_distro(rootfs)
+    if not distros:
+        distros = list(_NODE_CONFIG_PATHS.keys())
+
+    found: list[tuple[str, str]] = []
+    for distro in distros:
+        for cfg_rel in _NODE_CONFIG_PATHS.get(distro, []):
+            try:
+                full = str(safe_join(rootfs, cfg_rel.lstrip("/")))
+            except ValueError:
+                continue
+            if os.path.isfile(full):
+                found.append((distro, full))
+    return found
+
+
+def _load_yaml_config(filepath: str) -> dict[str, Any]:
+    """Load a single YAML config file."""
+    try:
+        with open(filepath, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        logger.warning("Cannot read config %s: %s", filepath, exc)
+        return {}
+
+
+def _extract_kubelet_fields(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Extract security fields from KubeletConfiguration YAML."""
+    # authentication.anonymous.enabled (default false in kubeadm, but
+    # may be true in some distros)
+    auth = cfg.get("authentication") or {}
+    anon = auth.get("anonymous") or {}
+    anonymous_enabled = anon.get("enabled", False) is True
+
+    # readOnlyPort (default 10255 for older versions, 0 means disabled)
+    readonly_port = cfg.get("readOnlyPort")
+    readonly_port_enabled = (
+        readonly_port is not None and readonly_port != 0
+    )
+
+    # authorization.mode
+    authz = cfg.get("authorization") or {}
+    authz_mode = authz.get("mode", "")
+    authorization_always_allow = authz_mode == "AlwaysAllow"
+
+    # protectKernelDefaults
+    protect_kernel = cfg.get("protectKernelDefaults", False)
+    protect_kernel_defaults_disabled = protect_kernel is not True
+
+    # streamingConnectionIdleTimeout
+    streaming_timeout = cfg.get("streamingConnectionIdleTimeout", "")
+    streaming_timeout_disabled = streaming_timeout == "0" or (
+        isinstance(streaming_timeout, str)
+        and streaming_timeout == "0s"
+    )
+
+    # eventRecordQPS
+    event_qps = cfg.get("eventRecordQPS")
+    event_record_qps_disabled = event_qps == 0
+
+    # TLS cert
+    tls_cert = cfg.get("tlsCertFile", "")
+    rotate_certs = cfg.get("rotateCertificates", False) is True
+    server_tls_bootstrap = cfg.get("serverTLSBootstrap", False) is True
+    tls_cert_missing = (
+        not tls_cert and not rotate_certs and not server_tls_bootstrap
+    )
+
+    return {
+        "anonymous_auth_enabled": anonymous_enabled,
+        "readonly_port_enabled": readonly_port_enabled,
+        "authorization_always_allow": authorization_always_allow,
+        "protect_kernel_defaults_disabled": protect_kernel_defaults_disabled,
+        "streaming_timeout_disabled": streaming_timeout_disabled,
+        "event_record_qps_disabled": event_record_qps_disabled,
+        "tls_cert_missing": tls_cert_missing,
+    }
+
+
+def _extract_k3s_rke2_fields(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Extract security fields from K3s/RKE2 config.yaml.
+
+    K3s/RKE2 config uses CLI flag names as YAML keys (without leading
+    dashes). Some map directly to kubelet args.
+    """
+    # K3s/RKE2 pass kubelet args via kubelet-arg list
+    kubelet_args = cfg.get("kubelet-arg") or []
+    if isinstance(kubelet_args, str):
+        kubelet_args = [kubelet_args]
+
+    # Parse kubelet args into a dict
+    kargs: dict[str, str] = {}
+    for arg in kubelet_args:
+        if not isinstance(arg, str):
+            continue
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            kargs[k.lstrip("-")] = v
+        else:
+            kargs[arg.lstrip("-")] = "true"
+
+    # anonymous-auth
+    anon_val = kargs.get("anonymous-auth", "")
+    anonymous_enabled = anon_val.lower() == "true"
+
+    # read-only-port
+    ro_port = kargs.get("read-only-port", "")
+    readonly_port_enabled = bool(ro_port) and ro_port != "0"
+
+    # authorization-mode
+    authz_mode = kargs.get("authorization-mode", "")
+    authorization_always_allow = authz_mode == "AlwaysAllow"
+
+    # protect-kernel-defaults
+    protect = kargs.get("protect-kernel-defaults", "")
+    # Also check top-level config key
+    top_protect = cfg.get("protect-kernel-defaults", False)
+    protect_kernel_defaults_disabled = (
+        protect.lower() != "true" and top_protect is not True
+    )
+
+    # streaming-connection-idle-timeout
+    streaming = kargs.get("streaming-connection-idle-timeout", "")
+    streaming_timeout_disabled = streaming in ("0", "0s")
+
+    # event-qps
+    event_qps = kargs.get("event-qps", "")
+    event_record_qps_disabled = event_qps == "0"
+
+    # TLS -- K3s/RKE2 auto-generate certs by default, so this is
+    # generally safe. Only flag if explicitly set to empty.
+    tls_cert = kargs.get("tls-cert-file", "not-checked")
+    tls_cert_missing = tls_cert == ""
+
+    return {
+        "anonymous_auth_enabled": anonymous_enabled,
+        "readonly_port_enabled": readonly_port_enabled,
+        "authorization_always_allow": authorization_always_allow,
+        "protect_kernel_defaults_disabled": protect_kernel_defaults_disabled,
+        "streaming_timeout_disabled": streaming_timeout_disabled,
+        "event_record_qps_disabled": event_record_qps_disabled,
+        "tls_cert_missing": tls_cert_missing,
+    }
+
+
+_NODE_FIELD_TO_KEY = {
+    "anonymous_auth_enabled": "authentication.anonymous.enabled",
+    "readonly_port_enabled": "readOnlyPort",
+    "authorization_always_allow": "authorization.mode",
+    "protect_kernel_defaults_disabled": "protectKernelDefaults",
+    "streaming_timeout_disabled": "streamingConnectionIdleTimeout",
+    "event_record_qps_disabled": "eventRecordQPS",
+    "tls_cert_missing": "tlsCertFile / rotateCertificates",
+}
+
+
+# ---------------------------------------------------------------------
 # Manifest discovery
 # ---------------------------------------------------------------------
 
@@ -735,6 +906,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     pod_rules = _load_rules(RULE_PATH)
     rbac_rules = _load_rules(RBAC_RULE_PATH)
     infra_rules = _load_rules(INFRA_RULE_PATH)
+    node_rules = _load_rules(NODE_RULE_PATH)
 
     # Load dangerous hostpath list from config
     try:
@@ -923,6 +1095,48 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     "violations": vios,
                     "status": status,
                 }
+
+    # --- Node / kubelet configuration scanning ---
+    if node_rules:
+        for distro, cfg_path in _discover_node_configs(mount_path):
+            cfg = _load_yaml_config(cfg_path)
+            if not cfg:
+                continue
+
+            if distro == "kubeadm":
+                data = _extract_kubelet_fields(cfg)
+            else:
+                data = _extract_k3s_rke2_fields(cfg)
+
+            key = f"NodeConfig/{distro}"
+            vios_raw = evaluate_rules(data, node_rules)
+
+            def _resolve_node(_v, used_fields, _d=data):
+                lines = []
+                for f in used_fields:
+                    mk = _NODE_FIELD_TO_KEY.get(f, f)
+                    val = _d.get(f)
+                    if val is not None:
+                        lines.append(f"{mk} = {val}")
+                    else:
+                        lines.append(f"<missing> {mk}")
+                return lines
+
+            vios = process_violations(
+                vios_raw, cfg_path, mount_path, _resolve_node
+            )
+            status = "violated" if vios else "clean"
+            if any(v["type"] == "alert" for v in vios):
+                alert_count += 1
+            elif any(v["type"] == "warning" for v in vios):
+                warn_count += 1
+            results_map[key] = {
+                "kind": "NodeConfig",
+                "resource": distro,
+                "container": "",
+                "violations": vios,
+                "status": status,
+            }
 
     summary = {
         "kubernetes_scanned": len(results_map),

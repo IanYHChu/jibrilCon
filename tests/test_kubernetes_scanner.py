@@ -1722,3 +1722,171 @@ spec:
                 f"{r['kind']}/{r['resource']} has violations: "
                 f"{[v['id'] for v in r['violations']]}"
             )
+
+
+# ================================================================== #
+# Phase 3: Kubelet / K3s / RKE2 node configuration
+# ================================================================== #
+
+
+class TestKubeletConfig:
+    def test_insecure_kubelet_config(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        # kubeadm detection hint
+        (root / "etc" / "kubernetes" / "manifests").mkdir(parents=True)
+        _write_yaml(
+            root / "var" / "lib" / "kubelet" / "config.yaml",
+            """\
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+authentication:
+  anonymous:
+    enabled: true
+authorization:
+  mode: AlwaysAllow
+readOnlyPort: 10255
+protectKernelDefaults: false
+streamingConnectionIdleTimeout: "0"
+eventRecordQPS: 0
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_anonymous_auth_enabled" in vio_ids
+        assert "kubelet_authorization_always_allow" in vio_ids
+        assert "kubelet_readonly_port_enabled" in vio_ids
+        assert "kubelet_protect_kernel_defaults_disabled" in vio_ids
+        assert "kubelet_streaming_connection_timeout_disabled" in vio_ids
+        assert "kubelet_event_record_qps_disabled" in vio_ids
+        assert "kubelet_tls_cert_missing" in vio_ids
+
+    def test_secure_kubelet_config(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "kubernetes" / "manifests").mkdir(parents=True)
+        _write_yaml(
+            root / "var" / "lib" / "kubelet" / "config.yaml",
+            """\
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+authentication:
+  anonymous:
+    enabled: false
+authorization:
+  mode: Webhook
+readOnlyPort: 0
+protectKernelDefaults: true
+rotateCertificates: true
+serverTLSBootstrap: true
+eventRecordQPS: 5
+streamingConnectionIdleTimeout: "5m"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        assert node[0]["status"] == "clean"
+
+    def test_kubelet_tls_cert_configured(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "kubernetes" / "manifests").mkdir(parents=True)
+        _write_yaml(
+            root / "var" / "lib" / "kubelet" / "config.yaml",
+            """\
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+authentication:
+  anonymous:
+    enabled: false
+authorization:
+  mode: Webhook
+readOnlyPort: 0
+protectKernelDefaults: true
+tlsCertFile: /var/lib/kubelet/pki/kubelet.crt
+tlsPrivateKeyFile: /var/lib/kubelet/pki/kubelet.key
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_tls_cert_missing" not in vio_ids
+
+
+class TestK3sConfig:
+    def test_insecure_k3s_config(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=true"
+  - "read-only-port=10255"
+  - "authorization-mode=AlwaysAllow"
+  - "streaming-connection-idle-timeout=0"
+  - "event-qps=0"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_anonymous_auth_enabled" in vio_ids
+        assert "kubelet_readonly_port_enabled" in vio_ids
+        assert "kubelet_authorization_always_allow" in vio_ids
+        assert "kubelet_streaming_connection_timeout_disabled" in vio_ids
+        assert "kubelet_event_record_qps_disabled" in vio_ids
+
+    def test_secure_k3s_config(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+protect-kernel-defaults: true
+kubelet-arg:
+  - "anonymous-auth=false"
+  - "read-only-port=0"
+  - "authorization-mode=Webhook"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        assert node[0]["status"] == "clean"
+
+
+class TestRKE2Config:
+    def test_insecure_rke2_config(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "rke2").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "rke2" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=true"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_anonymous_auth_enabled" in vio_ids
+
+    def test_no_config_file_no_crash(self, tmp_path):
+        root = _make_rootfs(tmp_path)
+        # RKE2 hint but no config file
+        (root / "etc" / "rancher" / "rke2").mkdir(parents=True)
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        # Should not crash, just no NodeConfig results
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 0

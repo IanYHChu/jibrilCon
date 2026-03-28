@@ -52,6 +52,17 @@
     "/var/lib/etcd",
     "/etc/kubernetes"
   ],
+  "node_config_paths": {
+    "kubeadm": [
+      "/var/lib/kubelet/config.yaml"
+    ],
+    "k3s": [
+      "/etc/rancher/k3s/config.yaml"
+    ],
+    "rke2": [
+      "/etc/rancher/rke2/config.yaml"
+    ]
+  },
   "dangerous_capabilities": [
     "SYS_ADMIN",
     "SYS_PTRACE",

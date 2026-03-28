@@ -1,0 +1,151 @@
+{
+  "rules": [
+    {
+      "id": "kubelet_anonymous_auth_enabled",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Kubelet anonymous authentication is enabled",
+      "risk": "Anonymous authentication allows unauthenticated requests to the kubelet API (port 10250). An attacker on the network can exec into pods, read logs, and access the node without credentials.",
+      "remediation": "Set authentication.anonymous.enabled to false in the KubeletConfiguration.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["4.2.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "anonymous_auth_enabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "kubelet_readonly_port_enabled",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Kubelet read-only port is enabled",
+      "risk": "The read-only port (default 10255) exposes kubelet metrics and pod information without authentication. An attacker can enumerate pods, resource usage, and node configuration.",
+      "remediation": "Set readOnlyPort to 0 in the KubeletConfiguration to disable the read-only endpoint.",
+      "references": {
+        "mitre_attack": ["T1082"],
+        "cis_kubernetes_benchmark": ["4.2.4"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "readonly_port_enabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "kubelet_authorization_always_allow",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Kubelet authorization mode is set to AlwaysAllow",
+      "risk": "AlwaysAllow authorization permits any authenticated request to perform any operation on the kubelet API, including exec into pods and reading secrets. This bypasses all RBAC controls at the node level.",
+      "remediation": "Set authorization.mode to Webhook in the KubeletConfiguration so kubelet delegates authorization to the API server.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["4.2.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "authorization_always_allow",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "kubelet_protect_kernel_defaults_disabled",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Kubelet protectKernelDefaults is not enabled",
+      "risk": "Without protectKernelDefaults, pods can modify kernel parameters via sysctl that may affect the host or other pods. This weakens node-level isolation.",
+      "remediation": "Set protectKernelDefaults to true in the KubeletConfiguration.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_kubernetes_benchmark": ["4.2.6"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "protect_kernel_defaults_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "kubelet_streaming_connection_timeout_disabled",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "Kubelet streaming connection idle timeout is set to 0 (disabled)",
+      "risk": "Disabling the streaming connection timeout allows exec/attach sessions to remain open indefinitely. An attacker who establishes a session will not be disconnected automatically.",
+      "remediation": "Set streamingConnectionIdleTimeout to a non-zero value (e.g., 5m) in the KubeletConfiguration.",
+      "references": {
+        "mitre_attack": ["T1609"],
+        "cis_kubernetes_benchmark": ["4.2.5"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "streaming_timeout_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "kubelet_event_record_qps_disabled",
+      "type": "warning",
+      "severity": 3.0,
+      "description": "Kubelet event recording is disabled (eventRecordQPS set to 0)",
+      "risk": "Disabling event recording suppresses important audit events from the kubelet. Security-relevant events such as pod creation failures, image pull errors, and OOM kills will not be recorded.",
+      "remediation": "Set eventRecordQPS to a non-zero value (default is 5) in the KubeletConfiguration.",
+      "references": {
+        "mitre_attack": ["T1562.008"],
+        "cis_kubernetes_benchmark": ["4.2.9"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "event_record_qps_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "kubelet_tls_cert_missing",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Kubelet TLS certificate file is not configured",
+      "risk": "Without explicit TLS certificate configuration and with rotateCertificates disabled, the kubelet may serve its API over unencrypted HTTP or with a self-signed certificate, enabling man-in-the-middle attacks.",
+      "remediation": "Set tlsCertFile and tlsPrivateKeyFile, or enable rotateCertificates with serverTLSBootstrap in the KubeletConfiguration.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["4.2.10"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "tls_cert_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    }
+  ]
+}
