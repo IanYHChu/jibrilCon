@@ -17,7 +17,6 @@ Focus areas
 
 The module exposes:
 
-    priority : int  (for scanner_loader ordering)
     scan(mount_path: str, context: ScanContext) -> dict
 """
 
@@ -33,7 +32,7 @@ from util.path_utils import resolve_path, safe_join
 from util.config_loader import load_json_config
 from util.context import ScanContext
 from util.rules_engine import evaluate_rules
-from util.error_helpers import load_json_safe, SoftIOError
+from util.io_helpers import deep_merge, load_json_or_empty
 
 # ---------------------------------------------------------------------
 # Constants
@@ -55,24 +54,6 @@ _FIELD_TO_CONFIG_KEY = {
 # ---------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------
-def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recursively merge *src* into *dst*, with *src* taking precedence.
-
-    This mirrors the precedence cascade already used in scanners/lxc.py
-    for '--rcfile', ensuring overridden values propagate to rule logic.
-    """
-    for key, val in src.items():
-        if (
-            key in dst
-            and isinstance(dst[key], dict)
-            and isinstance(val, dict)
-        ):
-            _deep_merge(dst[key], val)
-        else:
-            dst[key] = val
-    return dst
-
 def _to_bool(value: Any) -> bool:
     """
     Convert common string / int representations to bool.
@@ -87,19 +68,12 @@ def _to_bool(value: Any) -> bool:
         return bool(value)
     return False
 
-def _load_json(path: str) -> Dict[str, Any]:
-    """Read *path* safely; returns {} when SoftIOError is raised."""
-    try:
-        return load_json_safe(Path(path))
-    except SoftIOError:
-        return {}
-
 def _get_docker_data_root(rootfs: str) -> str:
     """
     Parse /etc/docker/daemon.json for "data-root"; default to
     /var/lib/docker if not found.
     """
-    cfg = _load_json(os.path.join(rootfs, "etc/docker/daemon.json"))
+    cfg = load_json_or_empty(os.path.join(rootfs, "etc/docker/daemon.json"))
     return cfg.get("data-root", "/var/lib/docker")
 
 def _get_user_docker_roots(rootfs: str) -> List[str]:
@@ -112,12 +86,13 @@ def _get_user_docker_roots(rootfs: str) -> List[str]:
     if not os.path.exists(passwd):
         return roots
 
-    for line in open(passwd, encoding="utf-8"):
-        parts = line.split(":")
-        if len(parts) >= 6:
-            home = parts[5].strip()
-            if home:
-                roots.append(os.path.join(rootfs, home.lstrip("/"), ".local/share/docker"))
+    with open(passwd, encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.split(":")
+            if len(parts) >= 6:
+                home = parts[5].strip()
+                if home:
+                    roots.append(os.path.join(rootfs, home.lstrip("/"), ".local/share/docker"))
     return roots
 
 def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
@@ -143,7 +118,7 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
             if os.path.exists(cfg) and os.path.exists(host):
                 name = cid[:12]
                 # try to read name from config
-                cfg_json = _load_json(cfg)
+                cfg_json = load_json_or_empty(cfg)
                 name = cfg_json.get("Name", "").lstrip("/") or name
                 discovered.append((name, cfg, host))
     return discovered
@@ -197,8 +172,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
 
     for name, cfg_path, host_path in _discover_container_dirs(mount_path):
         # 1) load default config
-        cfg_json = _load_json(resolve_path(cfg_path, mount_path))
-        host_json = _load_json(resolve_path(host_path, mount_path))
+        cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
+        host_json = load_json_or_empty(resolve_path(host_path, mount_path))
 
         # 2) acquire Exec* command lines  -----------------
         exec_lines: Tuple[str, ...] = context.get_exec_lines("docker", name)
@@ -216,14 +191,14 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                 "config.json",
             )
             if os.path.exists(conf_json_path):
-                override_cfg = _load_json(conf_json_path)
+                override_cfg = load_json_or_empty(conf_json_path)
                 if override_cfg:
                     # merge into main config
-                    _deep_merge(cfg_json, override_cfg)
+                    deep_merge(cfg_json, override_cfg)
                     # merge HostConfig block if provided
                     host_override = override_cfg.get("HostConfig")
                     if isinstance(host_override, dict):
-                        _deep_merge(host_json, host_override)
+                        deep_merge(host_json, host_override)
 
         data = _extract_fields(cfg_json, host_json)
 

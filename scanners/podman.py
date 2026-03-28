@@ -18,7 +18,6 @@ Focus areas
 
 The module exposes:
 
-    priority : int  (for scanner_loader ordering)
     scan(mount_path: str, context: ScanContext) -> dict
 """
 
@@ -34,7 +33,7 @@ from util.path_utils import resolve_path, safe_join
 from util.config_loader import load_json_config
 from util.context import ScanContext
 from util.rules_engine import evaluate_rules
-from util.error_helpers import load_json_safe, SoftIOError
+from util.io_helpers import deep_merge, load_json_or_empty
 
 try:
     import tomllib as toml  # type: ignore
@@ -63,30 +62,6 @@ _FIELD_TO_CONFIG_KEY = {
 # Internal helpers
 # ---------------------------------------------------------------------
 
-def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recursively merge *src* into *dst*; values in *src* take precedence.
-
-    Mirrors the behaviour in docker_native.py / lxc.py for consistent
-    override semantics.
-    """
-    for k, v in src.items():
-        if (
-            k in dst
-            and isinstance(dst[k], dict)
-            and isinstance(v, dict)
-        ):
-            _deep_merge(dst[k], v)
-        else:
-            dst[k] = v
-    return dst
-
-def _load_json(path: str) -> Dict[str, Any]:
-    try:
-        return load_json_safe(Path(path))
-    except SoftIOError:
-        return {}
-
 def _get_podman_data_root(rootfs: str) -> str:
     """
     Parse /etc/containers/storage.conf for graphRoot; fall back to
@@ -96,10 +71,11 @@ def _get_podman_data_root(rootfs: str) -> str:
     if not os.path.exists(cfg_path):
         return "/var/lib/containers/storage"
 
-    for line in open(cfg_path, encoding="utf-8"):
-        m = re.match(r'^\s*graphRoot\s*=\s*"(.*?)"', line)
-        if m:
-            return m.group(1)
+    with open(cfg_path, encoding="utf-8") as fh:
+        for line in fh:
+            m = re.match(r'^\s*graphRoot\s*=\s*"(.*?)"', line)
+            if m:
+                return m.group(1)
     return "/var/lib/containers/storage"
 
 def _get_user_podman_roots(rootfs: str) -> List[str]:
@@ -109,12 +85,13 @@ def _get_user_podman_roots(rootfs: str) -> List[str]:
     if not os.path.exists(passwd):
         return roots
 
-    for line in open(passwd, encoding="utf-8"):
-        parts = line.strip().split(":")
-        if len(parts) >= 6:
-            home = parts[5].strip()
-            if home:
-                roots.append(os.path.join(rootfs, home.lstrip("/"), ".local/share/containers/storage"))
+    with open(passwd, encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.strip().split(":")
+            if len(parts) >= 6:
+                home = parts[5].strip()
+                if home:
+                    roots.append(os.path.join(rootfs, home.lstrip("/"), ".local/share/containers/storage"))
     return roots
 
 def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
@@ -131,7 +108,7 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
         if not os.path.exists(index_path):
             continue
 
-        index_data = _load_json(index_path)
+        index_data = load_json_or_empty(index_path)
         for entry in index_data:
             cid = entry.get("id")
             names = entry.get("names", [])
@@ -187,7 +164,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
 
     for name, cfg_path in _discover_configs(mount_path):
         # 1) load default config
-        cfg_json = _load_json(resolve_path(cfg_path, mount_path))
+        cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
 
         # 2) acquire Exec* command lines  -----------------
         exec_lines: Tuple[str, ...] = context.get_exec_lines("podman", name)
@@ -202,9 +179,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                     "config.json",
                 )
                 if os.path.exists(conf_json_path):
-                    override_cfg = _load_json(conf_json_path)
+                    override_cfg = load_json_or_empty(conf_json_path)
                     if override_cfg:
-                        _deep_merge(cfg_json, override_cfg)
+                        deep_merge(cfg_json, override_cfg)
 
             # --module <file>
             m_mod = _MODULE_RE.search(line)
@@ -224,7 +201,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                         with open(mod_path, "rb") as fp:
                             mod_data = toml.load(fp)
                         if isinstance(mod_data, dict):
-                            _deep_merge(cfg_json, mod_data)
+                            deep_merge(cfg_json, mod_data)
                     except Exception:  # noqa: BLE001
                         # Gracefully ignore malformed TOML
                         pass

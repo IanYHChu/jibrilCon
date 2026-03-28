@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from util.logging_utils import init_logging
 import sys
 from typing import Dict
@@ -97,7 +98,11 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    
+
+    mount = Path(args.mount_path)
+    if not mount.is_dir():
+        parser.error(f"mount_path does not exist or is not a directory: {mount}")
+
     # 1. Initialisation – must precede any scanner import that might log
     init_logging(args.log_level)
 

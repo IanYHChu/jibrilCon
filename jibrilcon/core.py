@@ -53,7 +53,7 @@ def run_scan(
     ----------
     mount_path
         Path to a rootfs directory.
-    config_path
+    filters_path
         Optional override for ``config/systemd.json``.
     max_workers
         ThreadPool size (I/O-bound scanners benefit from modest parallelism).

@@ -17,7 +17,6 @@ Focus areas
 
 Exports
 -------
-priority : int   – execution order used by scanner_loader
 scan(mount_path: str, context: ScanContext) -> dict
 """
 
@@ -43,10 +42,6 @@ from util.systemd_unit_parser import scan_systemd_container_units
 
 BASE_DIR = Path(__file__).resolve().parent
 RULE_PATH = BASE_DIR.parent / "rule" / "lxc_config_rules.json"
-
-_ALL_RULES = load_json_config(RULE_PATH).get("rules", [])
-_CONFIG_RULES = [r for r in _ALL_RULES if not r["id"].startswith("mount_")]
-_MOUNT_RULES = [r for r in _ALL_RULES if r["id"].startswith("mount_")]
 
 # Regex patterns
 _IDMAP_RE = re.compile(r"^lxc\.idmap\s*=\s*([ug])\s+(\d+)\s+(\d+)\s+(\d+)")
@@ -126,10 +121,13 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
         All LXC config file paths found in the filesystem.
     """
     configs: Set[Path] = set()
-    for dirpath, _, filenames in os.walk(rootfs):
-        # skip large system dirs
-        if any(dirpath.startswith(os.path.join(rootfs, d.lstrip("/"))) for d in _EXCLUDE_DIRS):
-            continue
+    exclude_abs = {os.path.join(rootfs, d.lstrip("/")) for d in _EXCLUDE_DIRS}
+    for dirpath, dirnames, filenames in os.walk(rootfs):
+        # Prune excluded directories in-place so os.walk skips them entirely
+        dirnames[:] = [
+            d for d in dirnames
+            if os.path.join(dirpath, d) not in exclude_abs
+        ]
         for fname in filenames:
             # full = Path(dirpath) / fname
             full = safe_join(rootfs, os.path.relpath(Path(dirpath) / fname, rootfs))
@@ -294,6 +292,10 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
     if context is None:
         raise ValueError("ScanContext must be supplied by core.run_scan")
 
+    all_rules = load_json_config(RULE_PATH).get("rules", [])
+    config_rules = [r for r in all_rules if not r["id"].startswith("mount_")]
+    mount_rules = [r for r in all_rules if r["id"].startswith("mount_")]
+
     results: List[Dict[str, object]] = []
     alert_count = warning_count = total_containers = 0
     start_ts = time.time()
@@ -337,7 +339,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
         base_data = {**idmap_info, **capdrop_info, "runs_as_root": runs_as_root}
 
         # ------------------ config rules ------------------
-        config_vios_raw = evaluate_rules(base_data, _CONFIG_RULES)
+        config_vios_raw = evaluate_rules(base_data, config_rules)
         config_vios = []
         for v in config_vios_raw:
             used_fields = {c.get("field") for c in v.get("conditions", []) if c.get("field")}
@@ -356,7 +358,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
         mount_results = []
         for line in entries.get("lxc.mount.entry", []):
             mentry = _parse_mount_entry(line)
-            vios_raw = evaluate_rules(mentry, _MOUNT_RULES)
+            vios_raw = evaluate_rules(mentry, mount_rules)
             vios = []
             for v in vios_raw:
                 used_fields = {c.get("field") for c in v.get("conditions", []) if c.get("field")}

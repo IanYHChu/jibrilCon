@@ -25,6 +25,7 @@ data dict provided by scanner modules.
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from functools import lru_cache
@@ -168,5 +169,5 @@ def evaluate_rules(data: Dict[str, Any], rules: List[Dict[str, Any]]) -> List[Di
     output: List[Dict[str, Any]] = []
     for rule in rules:
         if _evaluate_rule_group(data, rule):
-            output.append(rule)
+            output.append(copy.deepcopy(rule))
     return output

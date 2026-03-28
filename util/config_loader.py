@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Set
@@ -28,7 +27,6 @@ from typing import Any, Dict, Set
 # ---------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
-_CACHE_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------
 # Exceptions
@@ -78,9 +76,7 @@ def load_json_config(
         If the file is absent, malformed, or lacks required keys.
     """
     path = Path(path)
-
-    with _CACHE_LOCK:  # ensure thread-safe first read
-        data = _read_json_file(path)
+    data = _read_json_file(path)
 
     if schema:
         missing = schema - data.keys()
