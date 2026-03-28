@@ -63,11 +63,27 @@ def run_scan(
     context = ScanContext()
 
     # 1. Init-system detection & pre-collection
-    init_sys = detect_init_system(mount_path)
+    try:
+        init_sys = detect_init_system(mount_path)
+    except (RuntimeError, OSError, ValueError) as exc:
+        logger.warning(
+            "Failed to detect init system, continuing without it: %s", exc
+        )
+        init_sys = ""
+
     logger.info("Detected init system: %s", init_sys or "<unknown>")
 
     if init_sys == "systemd":
-        collect_systemd_containers(mount_path, ctx=context, filters_path=filters_path)
+        try:
+            collect_systemd_containers(
+                mount_path, ctx=context, filters_path=filters_path
+            )
+        except (RuntimeError, OSError, ValueError) as exc:
+            logger.warning(
+                "Failed to collect systemd container data, "
+                "continuing without it: %s",
+                exc,
+            )
 
     context.init_system = init_sys
 

@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 from jibrilcon.util.passwd_utils import get_user_home_dirs
 
@@ -105,3 +106,60 @@ def test_empty_home_field_skipped(tmp_path):
     # nohome has empty home field, only alice returned
     assert len(homes) == 1
     assert any(h.endswith("/home/alice") for h in homes)
+
+
+# ------------------------------------------------------------------ #
+# Error-handling tests
+# ------------------------------------------------------------------ #
+
+
+def test_malformed_lines_logged_at_debug(tmp_path, caplog):
+    """Malformed lines are skipped with a debug log, valid lines still parsed."""
+    _write_passwd(
+        tmp_path,
+        (
+            "root:x:0:0:root:/root:/bin/bash\n"
+            "broken\n"
+            "also:broken\n"
+            "alice:x:1001:1001:Alice:/home/alice:/bin/bash\n"
+        ),
+    )
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="jibrilcon.util.passwd_utils"):
+        homes = get_user_home_dirs(str(tmp_path))
+
+    assert len(homes) == 2
+    debug_msgs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert len(debug_msgs) == 2
+    assert all("malformed passwd line" in r.message for r in debug_msgs)
+
+
+def test_permission_error_returns_empty(tmp_path, caplog):
+    """PermissionError on open() returns empty list and logs a warning."""
+    _write_passwd(tmp_path, "root:x:0:0:root:/root:/bin/bash\n")
+
+    with patch(
+        "builtins.open", side_effect=PermissionError("mocked permission denied")
+    ):
+        homes = get_user_home_dirs(str(tmp_path))
+
+    assert homes == []
+    assert any("permission denied" in r.message for r in caplog.records)
+
+
+def test_non_utf8_file_returns_partial_or_empty(tmp_path, caplog):
+    """A passwd file with non-UTF-8 bytes degrades gracefully."""
+    passwd = tmp_path / "etc" / "passwd"
+    passwd.parent.mkdir(parents=True, exist_ok=True)
+    # Write valid ASCII line followed by invalid UTF-8 bytes
+    passwd.write_bytes(
+        b"root:x:0:0:root:/root:/bin/bash\n"
+        b"bad:x:1000:1000:Bad:\xff\xfe/home/bad:/bin/bash\n"
+    )
+    homes = get_user_home_dirs(str(tmp_path))
+
+    # Should have recovered at least root before hitting the bad line,
+    # or returned empty -- either way no crash.
+    assert isinstance(homes, list)
+    assert any("encoding error" in r.message for r in caplog.records)

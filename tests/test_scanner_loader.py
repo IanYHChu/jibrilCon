@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from jibrilcon.util.context import ScanContext
-from jibrilcon.util.scanner_loader import run_scanners
+from jibrilcon.util.scanner_loader import _iter_scanner_modules, run_scanners
 
 
 # ------------------------------------------------------------------ #
@@ -127,3 +127,133 @@ def test_max_workers_parameter(mock_iter, mock_executor_cls):
     run_scanners("/fake/rootfs", context=ScanContext(), max_workers=3)
 
     mock_executor_cls.assert_called_once_with(max_workers=3)
+
+
+@patch("jibrilcon.util.scanner_loader._iter_scanner_modules")
+def test_scanner_type_error_logged_as_bug(mock_iter, caplog):
+    """TypeError from a scanner is logged as a likely bug, not silently swallowed."""
+
+    def good_scan(mount_path, *, context=None):
+        return {"scanner": "good", "findings": []}
+
+    def buggy_scan(mount_path, *, context=None):
+        raise TypeError("unsupported operand type(s)")
+
+    mock_iter.return_value = [
+        _make_scanner_module("jibrilcon.scanners.good", good_scan),
+        _make_scanner_module("jibrilcon.scanners.buggy", buggy_scan),
+    ]
+
+    results = run_scanners("/fake/rootfs", context=ScanContext())
+
+    # Good scanner still produces its result
+    assert len(results) == 1
+    assert results[0]["scanner"] == "good"
+
+    # TypeError is logged with the bug indicator
+    bug_records = [r for r in caplog.records if "likely a bug" in r.message]
+    assert len(bug_records) == 1
+    assert "TypeError" in bug_records[0].message
+    assert bug_records[0].levelname == "ERROR"
+
+
+@patch("jibrilcon.util.scanner_loader._iter_scanner_modules")
+def test_scanner_value_error_logged_as_bug(mock_iter, caplog):
+    """ValueError from a scanner is logged as a likely bug, not silently swallowed."""
+
+    def good_scan(mount_path, *, context=None):
+        return {"scanner": "good", "findings": []}
+
+    def buggy_scan(mount_path, *, context=None):
+        raise ValueError("invalid literal for int()")
+
+    mock_iter.return_value = [
+        _make_scanner_module("jibrilcon.scanners.good", good_scan),
+        _make_scanner_module("jibrilcon.scanners.buggy", buggy_scan),
+    ]
+
+    results = run_scanners("/fake/rootfs", context=ScanContext())
+
+    assert len(results) == 1
+    assert results[0]["scanner"] == "good"
+
+    bug_records = [r for r in caplog.records if "likely a bug" in r.message]
+    assert len(bug_records) == 1
+    assert "ValueError" in bug_records[0].message
+    assert bug_records[0].levelname == "ERROR"
+
+
+@patch("jibrilcon.util.scanner_loader._iter_scanner_modules")
+def test_scanner_runtime_error_logged_as_recoverable(mock_iter, caplog):
+    """RuntimeError is logged at ERROR level without the 'bug' indicator."""
+
+    def failing_scan(mount_path, *, context=None):
+        raise RuntimeError("some runtime issue")
+
+    mock_iter.return_value = [
+        _make_scanner_module("jibrilcon.scanners.failing", failing_scan),
+    ]
+
+    results = run_scanners("/fake/rootfs", context=ScanContext())
+
+    assert results == []
+
+    error_records = [r for r in caplog.records if "some runtime issue" in r.message]
+    assert len(error_records) == 1
+    # Recoverable errors should NOT have the bug indicator
+    assert "likely a bug" not in error_records[0].message
+
+
+@patch("jibrilcon.util.scanner_loader.importlib.import_module")
+def test_package_import_failure_does_not_crash(mock_import, caplog):
+    """If the scanner package itself fails to import, return empty list gracefully."""
+    mock_import.side_effect = ImportError("No module named 'jibrilcon.scanners'")
+
+    results = run_scanners("/fake/rootfs", context=ScanContext())
+
+    assert results == []
+
+    import_errors = [r for r in caplog.records if "Failed to import scanner package" in r.message]
+    assert len(import_errors) == 1
+
+
+def test_individual_module_import_failure_does_not_crash(caplog):
+    """If one scanner module fails to import, the others still load."""
+    from collections import namedtuple
+
+    pkg_module = _make_scanner_module("jibrilcon.scanners", lambda *a, **kw: None)
+    pkg_module.__file__ = "/fake/path/scanners/__init__.py"
+
+    working_module = _make_scanner_module(
+        "jibrilcon.scanners.working",
+        lambda mount_path, *, context=None: {"scanner": "working", "findings": []},
+    )
+
+    def import_side_effect(name):
+        if name == "jibrilcon.scanners":
+            return pkg_module
+        if name == "jibrilcon.scanners.broken":
+            raise SyntaxError("invalid syntax in broken scanner")
+        if name == "jibrilcon.scanners.working":
+            return working_module
+        raise ImportError(f"Unknown module {name}")
+
+    ModInfo = namedtuple("ModInfo", ["module_finder", "name", "ispkg"])
+    fake_modules = [
+        ModInfo(None, "broken", False),
+        ModInfo(None, "working", False),
+    ]
+
+    # Apply iter_modules patch first, then import_module, so that the
+    # patch() machinery itself does not route through our mock.
+    with patch("jibrilcon.util.scanner_loader.pkgutil.iter_modules", return_value=fake_modules), \
+         patch("jibrilcon.util.scanner_loader.importlib.import_module", side_effect=import_side_effect):
+        modules = _iter_scanner_modules()
+
+    # Only the working module should be returned
+    assert len(modules) == 1
+    assert modules[0].__name__ == "jibrilcon.scanners.working"
+
+    import_errors = [r for r in caplog.records if "Failed to import scanner module" in r.message]
+    assert len(import_errors) == 1
+    assert "broken" in import_errors[0].message

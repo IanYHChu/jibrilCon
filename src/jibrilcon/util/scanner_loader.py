@@ -43,13 +43,21 @@ _MAX_WORKERS = 8
 
 def _iter_scanner_modules() -> List[ModuleType]:
     """Import every *.py file under scanners/ and yield modules."""
-    pkg = importlib.import_module(_SCANNER_PKG)
+    try:
+        pkg = importlib.import_module(_SCANNER_PKG)
+    except Exception:
+        logger.exception("Failed to import scanner package %s", _SCANNER_PKG)
+        return []
+
     base_dir = Path(pkg.__file__).parent
 
     modules: List[ModuleType] = []
     for info in sorted(pkgutil.iter_modules([str(base_dir)]), key=lambda x: x.name):
         full_name = f"{_SCANNER_PKG}.{info.name}"
-        modules.append(importlib.import_module(full_name))
+        try:
+            modules.append(importlib.import_module(full_name))
+        except Exception:
+            logger.exception("Failed to import scanner module %s", full_name)
     return modules
 
 
@@ -102,7 +110,13 @@ def run_scanners(
                     results.append(res)
                 else:
                     logger.warning("Scanner %s returned non-dict result", name)
-            except (RuntimeError, OSError, TypeError, ValueError) as exc:
+            except (RuntimeError, OSError) as exc:
                 logger.error("Scanner %s raised: %s", name, exc)
+            except (TypeError, ValueError) as exc:
+                logger.exception(
+                    "Scanner %s raised %s -- this is likely a bug in the scanner",
+                    name,
+                    type(exc).__name__,
+                )
 
     return results

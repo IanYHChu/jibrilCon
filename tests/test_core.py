@@ -52,6 +52,45 @@ def test_run_scan_drops_malformed_results(make_rootfs):
     assert report["report"][0]["scanner"] == "docker"
 
 
+def test_run_scan_detect_init_system_error(make_rootfs):
+    """If detect_init_system raises RuntimeError, scan still proceeds."""
+    r = make_rootfs
+    cid = "core" * 8 + "2" * 36
+    r.add_docker_container(
+        cid,
+        config_v2={"Name": "/initfailtest"},
+        hostconfig={"Privileged": False, "ReadonlyRootfs": True, "Binds": []},
+    )
+
+    with patch(
+        "jibrilcon.core.detect_init_system",
+        side_effect=RuntimeError("corrupt ELF header"),
+    ):
+        report = run_scan(r.path)
+
+    assert "report" in report
+    assert "summary" in report
+    assert isinstance(report["report"], list)
+
+
+def test_run_scan_collect_systemd_containers_error(make_rootfs):
+    """If collect_systemd_containers raises OSError, scan still proceeds."""
+    r = make_rootfs
+
+    with patch(
+        "jibrilcon.core.detect_init_system",
+        return_value="systemd",
+    ), patch(
+        "jibrilcon.core.collect_systemd_containers",
+        side_effect=OSError("permission denied reading unit files"),
+    ):
+        report = run_scan(r.path)
+
+    assert "report" in report
+    assert "summary" in report
+    assert isinstance(report["report"], list)
+
+
 def test_run_scan_empty_rootfs(make_rootfs):
     """An empty rootfs (no containers) should return an empty report."""
     r = make_rootfs
