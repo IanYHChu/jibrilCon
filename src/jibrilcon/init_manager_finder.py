@@ -15,10 +15,10 @@ Lightweight heuristics to:
 
 Public helpers
 --------------
-``detect_init_system(rootfs)``  
+``detect_init_system(rootfs)``
     → ``"systemd" | "sysvinit" | "openrc" | ""``
 
-``collect_systemd_containers(rootfs, ctx)``  
+``collect_systemd_containers(rootfs, ctx)``
     → ``None`` (context is mutated in-place)
 """
 
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------
+
 
 def _bytes_contains(path: Path, marker: bytes, limit: int = 4096) -> bool:
     try:
@@ -64,18 +65,13 @@ def _elf_contains(path: Path, marker: bytes) -> bool:
 
 
 def _is_systemd_binary(path: Path) -> bool:
-    return (
-        _bytes_contains(path, b"systemd") or
-        _elf_contains(path, b"systemd")
-    )
+    return _bytes_contains(path, b"systemd") or _elf_contains(path, b"systemd")
 
 
 def _is_sysv_binary(path: Path) -> bool:
     # classical sysvinit often contains "sysvinit" / "telinit"
-    return (
-        _bytes_contains(path, b"sysvinit") or
-        _elf_contains(path, b"sysvinit")
-    )
+    return _bytes_contains(path, b"sysvinit") or _elf_contains(path, b"sysvinit")
+
 
 _CANDIDATE_BINARIES = (
     Path("sbin/init"),
@@ -86,6 +82,7 @@ _CANDIDATE_BINARIES = (
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 def detect_init_system(rootfs: Path | str) -> str:
     """

@@ -76,6 +76,7 @@ _FIELD_TO_CONFIG_KEY = {
 # Internal helpers
 # ---------------------------------------------------------------------
 
+
 @lru_cache(maxsize=8192)
 def _is_text_file(path: str) -> bool:
     """Return True if *path* is a small UTF-8 text file."""
@@ -87,6 +88,7 @@ def _is_text_file(path: str) -> bool:
         return True
     except (UnicodeDecodeError, OSError):
         return False
+
 
 def _file_contains_rootfs(
     path: Path,
@@ -130,6 +132,7 @@ def _file_contains_rootfs(
                 return True
     return False
 
+
 def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
     """
     Search all files under rootfs that define 'lxc.rootfs.path'.
@@ -150,8 +153,7 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
     for dirpath, dirnames, filenames in os.walk(rootfs):
         # Prune excluded directories in-place so os.walk skips them entirely
         dirnames[:] = [
-            d for d in dirnames
-            if os.path.join(dirpath, d) not in exclude_abs
+            d for d in dirnames if os.path.join(dirpath, d) not in exclude_abs
         ]
         for fname in filenames:
             # full = Path(dirpath) / fname
@@ -162,6 +164,7 @@ def _get_lxc_rootfs_config_candidates(rootfs: str) -> Set[Path]:
             except (OSError, ValueError, UnicodeDecodeError):
                 continue
     return configs
+
 
 def _filter_active_lxc_configs(configs: Set[Path], rootfs: str) -> Set[Path]:
     """
@@ -232,7 +235,7 @@ def _extract_cli_params(
     overrides: List[str] = []
 
     for cmd in exec_lines:
-        if (m := _RCFILE_RE.search(cmd)):
+        if m := _RCFILE_RE.search(cmd):
             rcfile = m.group("rcfile")
 
         for dm in _DEFINE_RE.finditer(cmd):
@@ -373,7 +376,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
         exec_lines = context.get_exec_lines("lxc", container_name)
         if not exec_lines:
             exec_lines = _find_systemd_exec_lines(mount_path, container_name)
-        
+
         # 3) derive rcfile / -s CLI overrides ------------
         rcfile_path, override_tokens = _extract_cli_params(exec_lines)
 
@@ -397,11 +400,21 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
         net_info = _extract_net_type(entries)
 
         # infer runs_as_root from context or missing mappings
-        systemd_root = context.is_systemd_started("lxc", container_name) and context.is_user_missing(container_name)
-        mapping_root = idmap_info.get("uidmap") is None and idmap_info.get("gidmap") is None
+        systemd_root = context.is_systemd_started(
+            "lxc", container_name
+        ) and context.is_user_missing(container_name)
+        mapping_root = (
+            idmap_info.get("uidmap") is None and idmap_info.get("gidmap") is None
+        )
         runs_as_root = systemd_root or mapping_root
 
-        base_data = {**idmap_info, **capdrop_info, **apparmor_info, **net_info, "runs_as_root": runs_as_root}
+        base_data = {
+            **idmap_info,
+            **capdrop_info,
+            **apparmor_info,
+            **net_info,
+            "runs_as_root": runs_as_root,
+        }
 
         # ------------------ config rules ------------------
         config_vios_raw = evaluate_rules(base_data, config_rules)
@@ -418,7 +431,10 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
             return lines
 
         config_vios = process_violations(
-            config_vios_raw, str(cfg_path), mount_path, _resolve_config_lines,
+            config_vios_raw,
+            str(cfg_path),
+            mount_path,
+            _resolve_config_lines,
         )
 
         # ------------------ mount rules -------------------
@@ -436,7 +452,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
                 return lines
 
             mount_results.extend(
-                process_violations(vios_raw, str(cfg_path), mount_path, _resolve_mount_lines)
+                process_violations(
+                    vios_raw, str(cfg_path), mount_path, _resolve_mount_lines
+                )
             )
 
         all_vios = config_vios + mount_results

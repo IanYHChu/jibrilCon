@@ -133,7 +133,7 @@ def scan_systemd_container_units(
                 continue
 
             kvmap = _parse_unit_lines(raw)
-            
+
             exec_lines: List[str] = []
             for key in exec_keys:
                 exec_lines.extend(kvmap.get(key, []))
@@ -173,6 +173,7 @@ def scan_systemd_container_units(
             logger.debug("parsed container unit: %s", svc_file.name)
 
     return rows
+
 
 def collect_systemd_containers(
     rootfs: str | Path,
@@ -218,7 +219,7 @@ def collect_systemd_containers(
                 all_exec.extend(lines)
         if all_exec:
             ctx.add_exec_lines(engine, cname, all_exec)
-        
+
         # Development-time information
         logger.info(
             "[systemd] unit=%s engine=%s container=%s user=%s exec=%s",

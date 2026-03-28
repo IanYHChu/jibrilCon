@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------
 
+
 def _is_int(value: Any) -> bool:
     """Return True if *value* is an int and not a bool."""
     return isinstance(value, int) and not isinstance(value, bool)
+
 
 def _add_numeric_fields(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
     """
@@ -35,6 +37,7 @@ def _add_numeric_fields(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
     for key, val in src.items():
         if _is_int(val):
             dst[key] = dst.get(key, 0) + val
+
 
 def _merge_summaries(
     total: Dict[str, Any],
@@ -49,6 +52,7 @@ def _merge_summaries(
     _add_numeric_fields(total, part)
     total.setdefault("scanners_run", []).append(scanner_name)
 
+
 def _merge_results_stats(total: Dict[str, Any], results: List[Dict[str, Any]]) -> None:
     """
     Analyse per-unit results (container or service entries) and count how
@@ -62,14 +66,18 @@ def _merge_results_stats(total: Dict[str, Any], results: List[Dict[str, Any]]) -
         elif status == "violated":
             violated += 1
         else:
-            logger.warning("Unexpected container status '%s', counting as violated", status)
+            logger.warning(
+                "Unexpected container status '%s', counting as violated", status
+            )
             violated += 1
     total["clean"] = total.get("clean", 0) + clean
     total["violated"] = total.get("violated", 0) + violated
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 def generate_final_report(scanner_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """

@@ -27,6 +27,7 @@ from typing import Dict, Set, List, Tuple
 # Public class
 # ---------------------------------------------------------------------
 
+
 class ScanContext:
     """
     Shared scanning context across all scanner modules.
@@ -71,7 +72,7 @@ class ScanContext:
         """
         with self._lock:
             self._user_missing.add(container_name)
-    
+
     def add_exec_lines(
         self, engine: str, container_name: str, lines: List[str]
     ) -> None:

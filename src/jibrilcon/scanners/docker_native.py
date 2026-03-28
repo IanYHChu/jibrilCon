@@ -50,9 +50,15 @@ _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 
 # Capabilities considered dangerous when added to a container.
 # Docker may store caps with or without the "CAP_" prefix.
-_DANGEROUS_CAPS = frozenset({
-    "SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "NET_RAW", "NET_ADMIN",
-})
+_DANGEROUS_CAPS = frozenset(
+    {
+        "SYS_ADMIN",
+        "SYS_PTRACE",
+        "SYS_MODULE",
+        "NET_RAW",
+        "NET_ADMIN",
+    }
+)
 
 # Map rule field names to JSON keys (for pretty printing if needed)
 _FIELD_TO_CONFIG_KEY = {
@@ -68,6 +74,7 @@ _FIELD_TO_CONFIG_KEY = {
     "cap_drop_missing": "HostConfig.CapDrop",
     "apparmor_disabled": "HostConfig.SecurityOpt",
 }
+
 
 # ---------------------------------------------------------------------
 # Internal helpers
@@ -86,6 +93,7 @@ def _to_bool(value: Any) -> bool:
         return bool(value)
     return False
 
+
 def _get_docker_data_root(rootfs: str) -> str:
     """
     Parse /etc/docker/daemon.json for "data-root"; default to
@@ -94,15 +102,16 @@ def _get_docker_data_root(rootfs: str) -> str:
     cfg = load_json_or_empty(os.path.join(rootfs, "etc/docker/daemon.json"))
     return cfg.get("data-root", "/var/lib/docker")
 
+
 def _get_user_docker_roots(rootfs: str) -> List[str]:
     """
     Return a list of rootless Docker data directories discovered in each
     user's home directory.
     """
     return [
-        os.path.join(home, ".local/share/docker")
-        for home in get_user_home_dirs(rootfs)
+        os.path.join(home, ".local/share/docker") for home in get_user_home_dirs(rootfs)
     ]
+
 
 def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
     """
@@ -141,11 +150,14 @@ def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
                 discovered.append((name, cfg, host))
     return discovered
 
+
 def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]:
     """Pick out the fields needed by rules_engine."""
     sec_opts = host.get("SecurityOpt") or []
     if not isinstance(sec_opts, list):
-        logger.warning("SecurityOpt is not a list, ignoring: %s", type(sec_opts).__name__)
+        logger.warning(
+            "SecurityOpt is not a list, ignoring: %s", type(sec_opts).__name__
+        )
         sec_opts = []
     binds = host.get("Binds") or []
     if not isinstance(binds, list):
@@ -158,6 +170,7 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
     privileged = _to_bool(privileged_raw)
 
     readonly_rootfs = _to_bool(host.get("ReadonlyRootfs", False))
+
     # Docker bind format: src:dst[:opts] where opts is comma-separated
     # (e.g. "ro", "ro,rslave"). A bind is readonly if "ro" appears in opts.
     def _bind_is_writable(b: str) -> bool:
@@ -169,9 +182,7 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
 
     binds_not_readonly = any(_bind_is_writable(b) for b in binds)
 
-    seccomp_disabled = any(
-        str(o).startswith("seccomp=unconfined") for o in sec_opts
-    )
+    seccomp_disabled = any(str(o).startswith("seccomp=unconfined") for o in sec_opts)
 
     # Host namespace sharing
     pid_mode_is_host = host.get("PidMode", "") == "host"
@@ -190,9 +201,7 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
     cap_drop_missing = not (host.get("CapDrop") or [])
 
     # AppArmor disabled
-    apparmor_disabled = any(
-        str(o) == "apparmor=unconfined" for o in sec_opts
-    )
+    apparmor_disabled = any(str(o) == "apparmor=unconfined" for o in sec_opts)
 
     return {
         "privileged": privileged,
@@ -211,6 +220,7 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
     """
@@ -319,4 +329,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         "elapsed": round(time.time() - start_ts, 3),
     }
 
-    return {"scanner": "docker", "summary": summary, "results": list(containers.values())}
+    return {
+        "scanner": "docker",
+        "summary": summary,
+        "results": list(containers.values()),
+    }

@@ -4,14 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jibrilcon"
-version = "0.1.0"
+version = "1.0.0"
 description = "Static risk scanner for container configurations in embedded Linux rootfs images"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
+authors = [{name = "IanYHChu"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 5 - Production/Stable",
+    "Topic :: Security",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+]
 dependencies = [
     "tomli>=2.0; python_version < '3.11'",
 ]
+
+[project.urls]
+Repository = "https://github.com/IanYHChu/jibrilcon"
 
 [project.scripts]
 jibrilcon = "jibrilcon.cli:main"

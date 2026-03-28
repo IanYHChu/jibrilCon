@@ -5,6 +5,7 @@
 """
 Common path helpers used by scanners.
 """
+
 from __future__ import annotations
 
 import os
@@ -16,12 +17,13 @@ from pathlib import Path
 # Hardening constants
 # ---------------------------------------------------------------------
 
-_MAX_SYMLINK_DEPTH = 40           # prevent extremely deep chains
-_MAX_COMPONENT_LENGTH = 255      # POSIX file-name limit
+_MAX_SYMLINK_DEPTH = 40  # prevent extremely deep chains
+_MAX_COMPONENT_LENGTH = 255  # POSIX file-name limit
 
 # ---------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------
+
 
 def _is_within_rootfs(target: str, rootfs_path: str) -> bool:
     """
@@ -36,14 +38,17 @@ def _is_within_rootfs(target: str, rootfs_path: str) -> bool:
     common = os.path.commonpath([root_abs, tgt_abs])
     return common == root_abs
 
+
 def _validate_component(name: str) -> None:
     """Raise if *name* is an overlong path component (ReDoS protection)."""
     if len(name) > _MAX_COMPONENT_LENGTH:
         raise RuntimeError(f"path component too long: {name!r}")
 
+
 # ---------------------------------------------------------------------
 # Core resolving logic
 # ---------------------------------------------------------------------
+
 
 def _resolve_recursive(
     path: str,
@@ -107,6 +112,7 @@ def _resolve_recursive(
 
     return _resolve_recursive(next_path, rootfs_path, _seen, _depth + 1)
 
+
 def _resolve_symlink(path: str, rootfs_path: str) -> str:
     """
     Resolve a single path (non-cached).
@@ -116,9 +122,11 @@ def _resolve_symlink(path: str, rootfs_path: str) -> str:
     abs_path = os.path.abspath(path)
     return _resolve_recursive(abs_path, rootfs_path)
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 @lru_cache(maxsize=2048)
 def resolve_path(path: str, rootfs_path: str) -> str:
@@ -129,6 +137,7 @@ def resolve_path(path: str, rootfs_path: str) -> str:
     so repeated look-ups do not hit the filesystem again.
     """
     return _resolve_symlink(path, rootfs_path)
+
 
 def safe_join(rootfs: str | Path, *parts: str | Path) -> Path:
     """

@@ -37,6 +37,7 @@ from jibrilcon.util.summary_utils import generate_final_report
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------- #
 # Public API                                                                   #
 # ---------------------------------------------------------------------------- #
@@ -66,14 +67,14 @@ def run_scan(
     logger.info("Detected init system: %s", init_sys or "<unknown>")
 
     if init_sys == "systemd":
-        collect_systemd_containers(
-            mount_path, ctx=context, filters_path=filters_path
-        )
+        collect_systemd_containers(mount_path, ctx=context, filters_path=filters_path)
 
     context.init_system = init_sys
 
     # 2. Run scanners (thread-parallel) via util.scanner_loader
-    results: List[Dict[str, object]] = run_scanners(str(mount_path), context=context, max_workers=max_workers)
+    results: List[Dict[str, object]] = run_scanners(
+        str(mount_path), context=context, max_workers=max_workers
+    )
 
     # 3. Build final report (filtering to blocks that contain the "scanner" key)
     clean_results = []
@@ -81,5 +82,7 @@ def run_scan(
         if isinstance(r, dict) and r.get("scanner"):
             clean_results.append(r)
         else:
-            logger.warning("Dropping malformed scanner result (missing 'scanner' key): %s", r)
+            logger.warning(
+                "Dropping malformed scanner result (missing 'scanner' key): %s", r
+            )
     return generate_final_report(clean_results)

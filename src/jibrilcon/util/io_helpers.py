@@ -26,11 +26,7 @@ def deep_merge(
     if _depth > _MAX_MERGE_DEPTH:
         raise RecursionError("deep_merge exceeded maximum depth")
     for key, val in src.items():
-        if (
-            key in dst
-            and isinstance(dst[key], dict)
-            and isinstance(val, dict)
-        ):
+        if key in dst and isinstance(dst[key], dict) and isinstance(val, dict):
             deep_merge(dst[key], val, _depth=_depth + 1)
         else:
             dst[key] = val

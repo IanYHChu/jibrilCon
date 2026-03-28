@@ -34,12 +34,15 @@ _lock = threading.Lock()
 # Exceptions
 # ---------------------------------------------------------------------
 
+
 class ConfigLoadError(RuntimeError):
     """Raised when a config file is missing or contains invalid JSON."""
+
 
 # ---------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------
+
 
 def _read_json_file(path: Path) -> Dict[str, Any]:
     """Read *path* as UTF-8 JSON and return the parsed dict."""
@@ -51,9 +54,11 @@ def _read_json_file(path: Path) -> Dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ConfigLoadError(f"Invalid JSON in config file: {path}") from exc
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 @lru_cache(maxsize=128)
 def _load_json_config_cached(
@@ -104,9 +109,11 @@ def load_json_config(
     with _lock:
         return _load_json_config_cached(path, schema=schema)
 
+
 def load_rules(path: str | Path) -> list[dict]:
     """Convenience wrapper that returns data['rules'] or an empty list."""
     return load_json_config(path).get("rules", [])
+
 
 def clear_cache() -> None:
     """Flush the LRU cache (useful in unit tests)."""

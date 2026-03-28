@@ -17,8 +17,10 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
+
 class SoftIOError(RuntimeError):
     """Raised when we meet an expected IO condition but want to continue."""
+
     pass
 
 
@@ -33,6 +35,11 @@ def load_json_safe(path: Path) -> Dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
         return json.loads(text)
-    except (FileNotFoundError, PermissionError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (
+        FileNotFoundError,
+        PermissionError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    ) as exc:
         logger.warning("Skipped %s: %s", path, exc)
         raise SoftIOError(str(path)) from exc

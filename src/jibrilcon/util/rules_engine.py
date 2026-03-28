@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Operator helpers
 # ---------------------------------------------------------------------
 
+
 def _equals(a: Any, b: Any) -> bool:
     return a == b
 
@@ -96,6 +97,7 @@ def _in_op(a: Any, b: List[Any]) -> bool:
 def _not_in_op(a: Any, b: List[Any]) -> bool:
     return a not in b
 
+
 # Map operator string to implementation
 _OPERATOR_MAP: Dict[str, Callable[[Any, Any], bool]] = {
     "equals": _equals,
@@ -118,10 +120,12 @@ _OPERATOR_MAP: Dict[str, Callable[[Any, Any], bool]] = {
 # Internal helpers
 # ---------------------------------------------------------------------
 
+
 @lru_cache(maxsize=256)
 def _compile_regex(pattern: str) -> re.Pattern:
     """Compile *pattern* and cache the result."""
     return re.compile(pattern)
+
 
 def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
     """Return True if *cond* matches *data*, else False."""
@@ -141,7 +145,9 @@ def _match_condition(data: Dict[str, Any], cond: Dict[str, Any]) -> bool:
         logger.error("Condition evaluation error: %s", exc, exc_info=True)
         return False
 
+
 _VALID_LOGIC = {"and", "or"}
+
 
 def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
     """Evaluate all conditions in *rule* according to its logic."""
@@ -149,7 +155,8 @@ def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
     if logic not in _VALID_LOGIC:
         logger.warning(
             "Unknown logic '%s' in rule '%s', defaulting to 'and'",
-            rule.get("logic"), rule.get("id", "<unknown>"),
+            rule.get("logic"),
+            rule.get("id", "<unknown>"),
         )
         logic = "and"
     conditions = rule.get("conditions", [])
@@ -161,11 +168,15 @@ def _evaluate_rule_group(data: Dict[str, Any], rule: Dict[str, Any]) -> bool:
         return any(results)
     return all(results)
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
 
-def evaluate_rules(data: Dict[str, Any], rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+def evaluate_rules(
+    data: Dict[str, Any], rules: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """
     Evaluate *rules* against *data*.
 

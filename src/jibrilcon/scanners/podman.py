@@ -56,13 +56,15 @@ _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 _MODULE_RE = re.compile(r"(?:^|\s)--module\s+(?P<modfile>\S+)")
 
 # Capabilities considered dangerous for container isolation
-_DANGEROUS_CAPS = frozenset({
-    "CAP_SYS_ADMIN",
-    "CAP_SYS_PTRACE",
-    "CAP_SYS_MODULE",
-    "CAP_NET_RAW",
-    "CAP_NET_ADMIN",
-})
+_DANGEROUS_CAPS = frozenset(
+    {
+        "CAP_SYS_ADMIN",
+        "CAP_SYS_PTRACE",
+        "CAP_SYS_MODULE",
+        "CAP_NET_RAW",
+        "CAP_NET_ADMIN",
+    }
+)
 
 # Map rule field names to JSON keys (used by report writer if needed)
 _FIELD_TO_CONFIG_KEY = {
@@ -82,6 +84,7 @@ _FIELD_TO_CONFIG_KEY = {
 # Internal helpers
 # ---------------------------------------------------------------------
 
+
 def _get_podman_data_root(rootfs: str) -> str:
     """
     Parse /etc/containers/storage.conf for graphRoot; fall back to
@@ -99,12 +102,14 @@ def _get_podman_data_root(rootfs: str) -> str:
                 return m.group(1) or m.group(2)
     return "/var/lib/containers/storage"
 
+
 def _get_user_podman_roots(rootfs: str) -> List[str]:
     """Return rootless Podman storage directories under each user's home."""
     return [
         os.path.join(home, ".local/share/containers/storage")
         for home in get_user_home_dirs(rootfs)
     ]
+
 
 def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
     """
@@ -129,16 +134,21 @@ def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
             cid = entry.get("id")
             names = entry.get("names", [])
             name = names[0] if names else cid[:12]
-            cfg_path = os.path.join(base, "overlay-containers", cid, "userdata", "config.json")
+            cfg_path = os.path.join(
+                base, "overlay-containers", cid, "userdata", "config.json"
+            )
             if os.path.exists(cfg_path):
                 discovered.append((name, cfg_path))
     return discovered
+
 
 def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Produce data dict for rules_engine."""
     uid = cfg.get("process", {}).get("user", {}).get("uid", 0)
     if not isinstance(uid, int):
-        logger.warning("UID is not an integer (%s), defaulting to 0", type(uid).__name__)
+        logger.warning(
+            "UID is not an integer (%s), defaulting to 0", type(uid).__name__
+        )
         uid = 0
 
     mounts = cfg.get("mounts", []) or []
@@ -149,17 +159,25 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
     caps_obj = cfg.get("process", {}).get("capabilities", {})
     caps_bounding = caps_obj.get("bounding", [])
     if not isinstance(caps_bounding, list):
-        logger.warning("capabilities.bounding is not a list, ignoring: %s", type(caps_bounding).__name__)
+        logger.warning(
+            "capabilities.bounding is not a list, ignoring: %s",
+            type(caps_bounding).__name__,
+        )
         caps_bounding = []
     caps_effective = caps_obj.get("effective", [])
     if not isinstance(caps_effective, list):
-        logger.warning("capabilities.effective is not a list, ignoring: %s", type(caps_effective).__name__)
+        logger.warning(
+            "capabilities.effective is not a list, ignoring: %s",
+            type(caps_effective).__name__,
+        )
         caps_effective = []
 
     seccomp_present = "seccompProfilePath" in cfg.get("linux", {})
 
     binds_not_readonly = any(
-        isinstance(m, dict) and m.get("type") == "bind" and "ro" not in m.get("options", [])
+        isinstance(m, dict)
+        and m.get("type") == "bind"
+        and "ro" not in m.get("options", [])
         for m in mounts
     )
     has_cap_sys_admin = "CAP_SYS_ADMIN" in caps_bounding
@@ -175,11 +193,11 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # If a namespace type is NOT listed, the container inherits the host namespace
     namespaces = cfg.get("linux", {}).get("namespaces", [])
     if not isinstance(namespaces, list):
-        logger.warning("linux.namespaces is not a list, ignoring: %s", type(namespaces).__name__)
+        logger.warning(
+            "linux.namespaces is not a list, ignoring: %s", type(namespaces).__name__
+        )
         namespaces = []
-    ns_types_present = {
-        ns.get("type") for ns in namespaces if isinstance(ns, dict)
-    }
+    ns_types_present = {ns.get("type") for ns in namespaces if isinstance(ns, dict)}
     host_pid_namespace = "pid" not in ns_types_present
     host_network_namespace = "network" not in ns_types_present
     host_ipc_namespace = "ipc" not in ns_types_present
@@ -196,9 +214,11 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "dangerous_caps_present": dangerous_caps_present,
     }
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
     """
@@ -273,8 +293,10 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
                         if isinstance(mod_data, dict):
                             deep_merge(cfg_json, mod_data)
                     except (OSError, ValueError, KeyError) as exc:
-                        logger.warning("Skipping malformed module %s: %s", mod_path, exc)
-        
+                        logger.warning(
+                            "Skipping malformed module %s: %s", mod_path, exc
+                        )
+
         data = _extract_fields(cfg_json)
 
         # merge systemd inference: flag if service lacks non-root User=
@@ -316,4 +338,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         "elapsed": round(time.time() - start_ts, 3),
     }
 
-    return {"scanner": "podman", "summary": summary, "results": list(containers.values())}
+    return {
+        "scanner": "podman",
+        "summary": summary,
+        "results": list(containers.values()),
+    }

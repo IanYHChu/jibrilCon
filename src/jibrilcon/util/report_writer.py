@@ -29,6 +29,7 @@ from typing import Any
 # Internal helpers
 # ---------------------------------------------------------------------
 
+
 def _atomic_write(binary: bytes, target: Path) -> None:
     """
     Write *binary* to *target* in an atomic fashion:
@@ -55,9 +56,11 @@ def _atomic_write(binary: bytes, target: Path) -> None:
         except FileNotFoundError:
             pass
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 def write_report(
     report: Any,
