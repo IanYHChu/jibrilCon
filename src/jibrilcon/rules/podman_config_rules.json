@@ -125,6 +125,90 @@
           "value": false
         }
       ]
+    },
+    {
+      "id": "host_pid_namespace",
+      "type": "alert",
+      "severity": 8.5,
+      "description": "Container shares the host PID namespace",
+      "risk": "Host PID namespace sharing exposes all host processes to the container. An attacker can inspect, signal, or ptrace host processes, leading to credential theft or privilege escalation.",
+      "remediation": "Add a 'pid' namespace entry to linux.namespaces in the OCI runtime spec. Do not use --pid=host at container creation.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.5"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "host_pid_namespace",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "host_network_namespace",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Container shares the host network namespace",
+      "risk": "Host network namespace sharing gives the container full access to the host network stack, including listening on privileged ports, sniffing traffic, and bypassing network-level container isolation.",
+      "remediation": "Add a 'network' namespace entry to linux.namespaces in the OCI runtime spec. Do not use --network=host at container creation.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_docker_benchmark": ["5.6"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "host_network_namespace",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "host_ipc_namespace",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "Container shares the host IPC namespace",
+      "risk": "Host IPC namespace sharing allows the container to access shared memory segments on the host. An attacker can read or corrupt IPC resources used by host processes.",
+      "remediation": "Add an 'ipc' namespace entry to linux.namespaces in the OCI runtime spec. Do not use --ipc=host at container creation.",
+      "references": {
+        "mitre_attack": ["T1574"],
+        "cis_docker_benchmark": ["5.7"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "host_ipc_namespace",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "dangerous_caps_present",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Container has dangerous kernel capabilities",
+      "risk": "Capabilities such as CAP_SYS_ADMIN, CAP_SYS_PTRACE, CAP_SYS_MODULE, CAP_NET_RAW, and CAP_NET_ADMIN can be exploited to escape container isolation, load kernel modules, sniff network traffic, or manipulate host namespaces.",
+      "remediation": "Remove dangerous capabilities from the bounding and effective sets. Use the minimum set of capabilities required by the workload.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "dangerous_caps_present",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

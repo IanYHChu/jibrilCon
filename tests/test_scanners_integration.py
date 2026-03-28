@@ -33,6 +33,7 @@ class TestDockerScanner:
                 "Privileged": False,
                 "ReadonlyRootfs": True,
                 "Binds": ["/data:/data:ro"],
+                "CapDrop": ["ALL"],
             },
         )
         ctx = _make_context()
@@ -192,6 +193,7 @@ class TestDockerScanner:
                 "Privileged": False,
                 "ReadonlyRootfs": True,
                 "Binds": ["/data:/data:ro,rslave"],
+                "CapDrop": ["ALL"],
             },
         )
         ctx = _make_context()
@@ -218,6 +220,250 @@ class TestDockerScanner:
         assert len(containers) == 1
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "binds_not_readonly" in vio_ids
+
+    def test_passwd_path_traversal_rejected(self, make_rootfs):
+        """Malicious passwd home dirs with ../ must not escape rootfs."""
+        r = make_rootfs
+        r.add_passwd([
+            "legit:x:1000:1000:Legit:/home/legit:/bin/bash",
+            "evil:x:1001:1001:Evil:/home/../../etc:/bin/bash",
+        ])
+        # Place a docker dir under the legitimate home only
+        cid = "hhh" * 8 + "0" * 40
+        base = Path(r.path) / "home" / "legit" / ".local" / "share" / "docker" / "containers" / cid
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "config.v2.json").write_text(json.dumps({"Name": "/legit"}))
+        (base / "hostconfig.json").write_text(json.dumps({
+            "Privileged": False,
+            "ReadonlyRootfs": True,
+            "Binds": [],
+        }))
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        # The legitimate container should still be found
+        names = [c["container"] for c in result["results"]]
+        assert "legit" in names
+        # The evil traversal path should have been silently skipped (logged warning)
+        # and must NOT cause any crash or unexpected behavior
+
+    # -- Host namespace and capability rules --
+
+    def test_host_pid_namespace(self, make_rootfs):
+        r = make_rootfs
+        cid = "pid" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/hostpid"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "PidMode": "host",
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_pid_namespace" in vio_ids
+
+    def test_host_network_namespace(self, make_rootfs):
+        r = make_rootfs
+        cid = "net" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/hostnet"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "NetworkMode": "host",
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_network_namespace" in vio_ids
+
+    def test_host_ipc_namespace(self, make_rootfs):
+        r = make_rootfs
+        cid = "ipc" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/hostipc"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "IpcMode": "host",
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_ipc_namespace" in vio_ids
+
+    def test_dangerous_capabilities_added(self, make_rootfs):
+        r = make_rootfs
+        cid = "cap" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/dangcap"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapAdd": ["SYS_ADMIN", "NET_RAW"],
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_capabilities_added" in vio_ids
+
+    def test_dangerous_capabilities_with_cap_prefix(self, make_rootfs):
+        """Docker may store capabilities with the CAP_ prefix."""
+        r = make_rootfs
+        cid = "cpx" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/capprefix"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapAdd": ["CAP_SYS_PTRACE"],
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_capabilities_added" in vio_ids
+
+    def test_safe_capabilities_not_flagged(self, make_rootfs):
+        """Non-dangerous capabilities should not trigger the rule."""
+        r = make_rootfs
+        cid = "saf" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/safecap"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapAdd": ["NET_BIND_SERVICE", "CHOWN"],
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_capabilities_added" not in vio_ids
+
+    def test_cap_drop_missing(self, make_rootfs):
+        r = make_rootfs
+        cid = "nod" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/nodrop"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cap_drop_missing" in vio_ids
+
+    def test_cap_drop_present_not_flagged(self, make_rootfs):
+        """When CapDrop is set, cap_drop_missing should not fire."""
+        r = make_rootfs
+        cid = "drp" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/hasdrop"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["NET_RAW"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cap_drop_missing" not in vio_ids
+
+    def test_apparmor_disabled(self, make_rootfs):
+        r = make_rootfs
+        cid = "aar" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/noapparmor"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "SecurityOpt": ["apparmor=unconfined"],
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "apparmor_disabled" in vio_ids
+
+    def test_apparmor_with_profile_not_flagged(self, make_rootfs):
+        """A custom AppArmor profile should not trigger the rule."""
+        r = make_rootfs
+        cid = "aap" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/hasapparmor"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "SecurityOpt": ["apparmor=docker-default"],
+                "CapDrop": ["ALL"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "apparmor_disabled" not in vio_ids
+
+    def test_fully_hardened_container_clean(self, make_rootfs):
+        """A container with all security best practices should trigger none of the new rules."""
+        r = make_rootfs
+        cid = "hrd" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/hardened"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/data:/data:ro"],
+                "PidMode": "",
+                "NetworkMode": "bridge",
+                "IpcMode": "",
+                "CapAdd": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["apparmor=docker-default", "seccomp=/path/to/profile.json"],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        assert containers[0]["status"] == "clean"
+        assert containers[0]["violations"] == []
 
 
 # ------------------------------------------------------------------ #
@@ -255,22 +501,34 @@ class TestPodmanScanner:
             cid,
             "safepod",
             {
+                "root": {"path": "rootfs", "readonly": True},
                 "process": {
                     "user": {"uid": 1000},
-                    "capabilities": {"bounding": ["CAP_NET_BIND_SERVICE"]},
+                    "capabilities": {
+                        "bounding": ["CAP_NET_BIND_SERVICE"],
+                        "effective": ["CAP_NET_BIND_SERVICE"],
+                    },
                 },
                 "mounts": [],
-                "linux": {"readonlyPaths": ["/proc"]},
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "readonlyPaths": ["/proc"],
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                        {"type": "uts"},
+                    ],
+                },
             },
         )
         ctx = _make_context()
         result = podman.scan(r.path, context=ctx)
         safepod = [c for c in result["results"] if c["container"] == "safepod"]
         assert len(safepod) == 1
-        # Should have no alert-level violations for runs_as_root or cap_sys_admin
-        alert_ids = [v["id"] for v in safepod[0]["violations"] if v["type"] == "alert"]
-        assert "runs_as_root" not in alert_ids
-        assert "has_cap_sys_admin" not in alert_ids
+        assert safepod[0]["status"] == "clean"
+        assert safepod[0]["violations"] == []
 
     def test_cap_sys_admin_alert(self, make_rootfs):
         r = make_rootfs
@@ -356,6 +614,350 @@ class TestPodmanScanner:
                 "mounts": [],
                 "linux": {
                     "seccompProfilePath": "/path/to/seccomp.json",
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "readonly_rootfs_missing" in vio_ids
+
+    def test_passwd_path_traversal_rejected(self, make_rootfs):
+        """Malicious passwd home dirs with ../ must not escape rootfs."""
+        r = make_rootfs
+        r.add_passwd([
+            "legit:x:1000:1000:Legit:/home/legit:/bin/bash",
+            "evil:x:1001:1001:Evil:/home/../../etc:/bin/bash",
+        ])
+        # Place a podman storage dir under the legitimate home only
+        cid = "pod" * 8 + "6" * 40
+        sr = Path(r.path) / "home" / "legit" / ".local" / "share" / "containers" / "storage"
+        index = sr / "overlay-containers" / "containers.json"
+        index.parent.mkdir(parents=True, exist_ok=True)
+        index.write_text(json.dumps([{"id": cid, "names": ["legitpod"]}]))
+        cfg_dir = sr / "overlay-containers" / cid / "userdata"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.json").write_text(json.dumps({
+            "process": {
+                "user": {"uid": 1000},
+                "capabilities": {"bounding": []},
+            },
+            "mounts": [],
+            "linux": {"readonlyPaths": ["/proc"]},
+        }))
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        # The legitimate container should still be found
+        names = [c["container"] for c in result["results"]]
+        assert "legitpod" in names
+        # The evil traversal path should have been silently skipped
+
+    # -- Host namespace rules --
+
+    def test_host_pid_namespace(self, make_rootfs):
+        """Container missing pid namespace entry shares host PID namespace."""
+        r = make_rootfs
+        cid = "pod" * 8 + "7" * 40
+        r.add_podman_container(
+            cid,
+            "hostpidpod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_pid_namespace" in vio_ids
+        # network and ipc are present, so those should NOT fire
+        assert "host_network_namespace" not in vio_ids
+        assert "host_ipc_namespace" not in vio_ids
+
+    def test_host_network_namespace(self, make_rootfs):
+        """Container missing network namespace entry shares host network."""
+        r = make_rootfs
+        cid = "pod" * 8 + "8" * 40
+        r.add_podman_container(
+            cid,
+            "hostnetpod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_network_namespace" in vio_ids
+        assert "host_pid_namespace" not in vio_ids
+        assert "host_ipc_namespace" not in vio_ids
+
+    def test_host_ipc_namespace(self, make_rootfs):
+        """Container missing ipc namespace entry shares host IPC."""
+        r = make_rootfs
+        cid = "pod" * 8 + "9" * 40
+        r.add_podman_container(
+            cid,
+            "hostipcpod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_ipc_namespace" in vio_ids
+        assert "host_pid_namespace" not in vio_ids
+        assert "host_network_namespace" not in vio_ids
+
+    def test_all_host_namespaces_when_no_namespaces_array(self, make_rootfs):
+        """Empty linux.namespaces means all namespaces are shared with host."""
+        r = make_rootfs
+        cid = "poa" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "allhostns",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "host_pid_namespace" in vio_ids
+        assert "host_network_namespace" in vio_ids
+        assert "host_ipc_namespace" in vio_ids
+
+    # -- Dangerous capabilities --
+
+    def test_dangerous_caps_in_bounding(self, make_rootfs):
+        """Dangerous capabilities in bounding set trigger the rule."""
+        r = make_rootfs
+        cid = "pob" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "dangcappod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {
+                        "bounding": ["CAP_NET_RAW", "CAP_NET_BIND_SERVICE"],
+                        "effective": [],
+                    },
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_caps_present" in vio_ids
+
+    def test_dangerous_caps_in_effective(self, make_rootfs):
+        """Dangerous capabilities in effective set also trigger the rule."""
+        r = make_rootfs
+        cid = "poc" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "dangeffpod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {
+                        "bounding": ["CAP_NET_BIND_SERVICE"],
+                        "effective": ["CAP_SYS_PTRACE"],
+                    },
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_caps_present" in vio_ids
+
+    def test_safe_caps_not_flagged(self, make_rootfs):
+        """Non-dangerous capabilities should not trigger dangerous_caps_present."""
+        r = make_rootfs
+        cid = "pod" * 8 + "a" * 40
+        r.add_podman_container(
+            cid,
+            "safecappod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {
+                        "bounding": ["CAP_NET_BIND_SERVICE", "CAP_CHOWN"],
+                        "effective": ["CAP_NET_BIND_SERVICE"],
+                    },
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_caps_present" not in vio_ids
+
+    # -- readonly rootfs fix --
+
+    def test_readonly_rootfs_via_root_readonly(self, make_rootfs):
+        """root.readonly=true should NOT trigger readonly_rootfs_missing."""
+        r = make_rootfs
+        cid = "poe" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "rorootpod",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "readonly_rootfs_missing" not in vio_ids
+
+    def test_readonly_rootfs_missing_without_root_key(self, make_rootfs):
+        """Missing root.readonly should trigger readonly_rootfs_missing."""
+        r = make_rootfs
+        cid = "pof" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "norootpod",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "readonly_rootfs_missing" in vio_ids
+
+    def test_readonly_rootfs_false_triggers_rule(self, make_rootfs):
+        """root.readonly=false should trigger readonly_rootfs_missing."""
+        r = make_rootfs
+        cid = "pog" * 8 + "0" * 40
+        r.add_podman_container(
+            cid,
+            "rwrootpod",
+            {
+                "root": {"path": "rootfs", "readonly": False},
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": [], "effective": []},
+                },
+                "mounts": [],
+                "linux": {
+                    "seccompProfilePath": "/path/to/seccomp.json",
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                        {"type": "mount"},
+                    ],
                 },
             },
         )

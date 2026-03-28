@@ -53,14 +53,27 @@ RULE_PATH = BASE_DIR.parent / "rules" / "podman_config_rules.json"
 _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 _MODULE_RE = re.compile(r"(?:^|\s)--module\s+(?P<modfile>\S+)")
 
+# Capabilities considered dangerous for container isolation
+_DANGEROUS_CAPS = frozenset({
+    "CAP_SYS_ADMIN",
+    "CAP_SYS_PTRACE",
+    "CAP_SYS_MODULE",
+    "CAP_NET_RAW",
+    "CAP_NET_ADMIN",
+})
+
 # Map rule field names to JSON keys (used by report writer if needed)
 _FIELD_TO_CONFIG_KEY = {
     "process.user.uid": "process.user.uid",
     "has_cap_sys_admin": "process.capabilities.bounding",
     "binds_not_readonly": "mounts",
     "seccomp_disabled": "linux.seccompProfilePath",
-    "readonly_rootfs": "linux.readonlyPaths",
+    "readonly_rootfs": "root.readonly",
     "service_user_missing": "service_user_missing",
+    "host_pid_namespace": "linux.namespaces",
+    "host_network_namespace": "linux.namespaces",
+    "host_ipc_namespace": "linux.namespaces",
+    "dangerous_caps_present": "process.capabilities.bounding",
 }
 
 # ---------------------------------------------------------------------
@@ -97,7 +110,14 @@ def _get_user_podman_roots(rootfs: str) -> List[str]:
             if len(parts) >= 6:
                 home = parts[5].strip()
                 if home:
-                    roots.append(os.path.join(rootfs, home.lstrip("/"), ".local/share/containers/storage"))
+                    try:
+                        safe_home = safe_join(rootfs, home.lstrip("/"), ".local/share/containers/storage")
+                        roots.append(str(safe_home))
+                    except ValueError:
+                        logger.warning(
+                            "Skipping passwd home directory that escapes rootfs: %s",
+                            home,
+                        )
     return roots
 
 def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
@@ -140,11 +160,15 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning("mounts is not a list, ignoring: %s", type(mounts).__name__)
         mounts = []
 
-    ro_paths = cfg.get("linux", {}).get("readonlyPaths", [])
-    caps = cfg.get("process", {}).get("capabilities", {}).get("bounding", [])
-    if not isinstance(caps, list):
-        logger.warning("capabilities.bounding is not a list, ignoring: %s", type(caps).__name__)
-        caps = []
+    caps_obj = cfg.get("process", {}).get("capabilities", {})
+    caps_bounding = caps_obj.get("bounding", [])
+    if not isinstance(caps_bounding, list):
+        logger.warning("capabilities.bounding is not a list, ignoring: %s", type(caps_bounding).__name__)
+        caps_bounding = []
+    caps_effective = caps_obj.get("effective", [])
+    if not isinstance(caps_effective, list):
+        logger.warning("capabilities.effective is not a list, ignoring: %s", type(caps_effective).__name__)
+        caps_effective = []
 
     seccomp_present = "seccompProfilePath" in cfg.get("linux", {})
 
@@ -152,8 +176,27 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
         isinstance(m, dict) and m.get("type") == "bind" and "ro" not in m.get("options", [])
         for m in mounts
     )
-    has_cap_sys_admin = "CAP_SYS_ADMIN" in caps
-    readonly_rootfs = bool(ro_paths)
+    has_cap_sys_admin = "CAP_SYS_ADMIN" in caps_bounding
+
+    # OCI spec: root.readonly indicates read-only rootfs
+    readonly_rootfs = cfg.get("root", {}).get("readonly", False)
+
+    # Dangerous capabilities in bounding OR effective sets
+    all_caps = set(caps_bounding) | set(caps_effective)
+    dangerous_caps_present = bool(all_caps & _DANGEROUS_CAPS)
+
+    # OCI spec: linux.namespaces is an array of {"type": ..., "path": ...}
+    # If a namespace type is NOT listed, the container inherits the host namespace
+    namespaces = cfg.get("linux", {}).get("namespaces", [])
+    if not isinstance(namespaces, list):
+        logger.warning("linux.namespaces is not a list, ignoring: %s", type(namespaces).__name__)
+        namespaces = []
+    ns_types_present = {
+        ns.get("type") for ns in namespaces if isinstance(ns, dict)
+    }
+    host_pid_namespace = "pid" not in ns_types_present
+    host_network_namespace = "network" not in ns_types_present
+    host_ipc_namespace = "ipc" not in ns_types_present
 
     return {
         "process.user.uid": uid,
@@ -161,6 +204,10 @@ def _extract_fields(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "binds_not_readonly": binds_not_readonly,
         "seccomp_disabled": not seccomp_present,
         "readonly_rootfs": readonly_rootfs,
+        "host_pid_namespace": host_pid_namespace,
+        "host_network_namespace": host_network_namespace,
+        "host_ipc_namespace": host_ipc_namespace,
+        "dangerous_caps_present": dangerous_caps_present,
     }
 
 # ---------------------------------------------------------------------

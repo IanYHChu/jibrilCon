@@ -104,6 +104,132 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "host_pid_namespace",
+      "type": "alert",
+      "severity": 8.5,
+      "description": "Container shares the host's process namespace",
+      "risk": "Sharing the host PID namespace allows the container to see and interact with all host processes, enabling process injection and information disclosure.",
+      "remediation": "Remove --pid=host flag. Do not set PidMode to 'host' unless strictly required for monitoring purposes.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.5"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "pid_mode_is_host",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "host_network_namespace",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Container shares the host's network namespace",
+      "risk": "Sharing the host network namespace gives the container full access to host network interfaces and services bound to localhost, bypassing network isolation.",
+      "remediation": "Remove --network=host flag. Use bridge or overlay networking with explicit port mappings.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_docker_benchmark": ["5.6"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "network_mode_is_host",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "host_ipc_namespace",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "Container shares the host's IPC namespace",
+      "risk": "Sharing the host IPC namespace allows the container to read and write shared memory segments of host processes, enabling data exfiltration or tampering.",
+      "remediation": "Remove --ipc=host flag. Use private IPC namespace (the default) unless inter-process communication with host processes is strictly required.",
+      "references": {
+        "mitre_attack": ["T1190"],
+        "cis_docker_benchmark": ["5.7"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "ipc_mode_is_host",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "dangerous_capabilities_added",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Container has dangerous kernel capabilities added",
+      "risk": "Dangerous capabilities such as SYS_ADMIN, SYS_PTRACE, SYS_MODULE, NET_RAW, or NET_ADMIN greatly expand the container's attack surface, enabling kernel module loading, process tracing, and network-level attacks.",
+      "remediation": "Remove dangerous capabilities from --cap-add. Grant only the minimum capabilities required by the workload.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.4"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "dangerous_caps_added",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cap_drop_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No capabilities explicitly dropped",
+      "risk": "Without explicitly dropping unnecessary capabilities, the container retains the default capability set, which includes capabilities that may not be required and could be abused in an attack.",
+      "remediation": "Use --cap-drop=ALL and then --cap-add only the specific capabilities required by the workload.",
+      "references": {
+        "mitre_attack": ["T1068"],
+        "cis_docker_benchmark": ["5.4"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cap_drop_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apparmor_disabled",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "AppArmor profile is set to unconfined",
+      "risk": "Disabling AppArmor removes mandatory access control enforcement, allowing the container process unrestricted access to system resources within its namespace.",
+      "remediation": "Remove '--security-opt apparmor=unconfined'. Use the default AppArmor profile or provide a custom profile tailored to the workload.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["5.26"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apparmor_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

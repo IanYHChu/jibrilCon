@@ -46,6 +46,12 @@ RULE_PATH = BASE_DIR.parent / "rules" / "docker_config_rules.json"
 
 _CONFIG_RE = re.compile(r"(?:^|\s)--config\s+(?P<confdir>\S+)")
 
+# Capabilities considered dangerous when added to a container.
+# Docker may store caps with or without the "CAP_" prefix.
+_DANGEROUS_CAPS = frozenset({
+    "SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "NET_RAW", "NET_ADMIN",
+})
+
 # Map rule field names to JSON keys (for pretty printing if needed)
 _FIELD_TO_CONFIG_KEY = {
     "privileged": "HostConfig.Privileged",
@@ -53,6 +59,12 @@ _FIELD_TO_CONFIG_KEY = {
     "binds_not_readonly": "HostConfig.Binds",
     "seccomp_disabled": "HostConfig.SecurityOpt",
     "service_user_missing": "service_user_missing",
+    "pid_mode_is_host": "HostConfig.PidMode",
+    "network_mode_is_host": "HostConfig.NetworkMode",
+    "ipc_mode_is_host": "HostConfig.IpcMode",
+    "dangerous_caps_added": "HostConfig.CapAdd",
+    "cap_drop_missing": "HostConfig.CapDrop",
+    "apparmor_disabled": "HostConfig.SecurityOpt",
 }
 
 # ---------------------------------------------------------------------
@@ -96,7 +108,14 @@ def _get_user_docker_roots(rootfs: str) -> List[str]:
             if len(parts) >= 6:
                 home = parts[5].strip()
                 if home:
-                    roots.append(os.path.join(rootfs, home.lstrip("/"), ".local/share/docker"))
+                    try:
+                        safe_home = safe_join(rootfs, home.lstrip("/"), ".local/share/docker")
+                        roots.append(str(safe_home))
+                    except ValueError:
+                        logger.warning(
+                            "Skipping passwd home directory that escapes rootfs: %s",
+                            home,
+                        )
     return roots
 
 def _discover_container_dirs(rootfs: str) -> List[Tuple[str, str, str]]:
@@ -168,11 +187,38 @@ def _extract_fields(cfg: Dict[str, Any], host: Dict[str, Any]) -> Dict[str, Any]
         str(o).startswith("seccomp=unconfined") for o in sec_opts
     )
 
+    # Host namespace sharing
+    pid_mode_is_host = host.get("PidMode", "") == "host"
+    network_mode_is_host = host.get("NetworkMode", "") == "host"
+    ipc_mode_is_host = host.get("IpcMode", "") == "host"
+
+    # Dangerous capabilities -- normalise away the optional "CAP_" prefix
+    cap_add = host.get("CapAdd") or []
+    if not isinstance(cap_add, list):
+        logger.warning("CapAdd is not a list, ignoring: %s", type(cap_add).__name__)
+        cap_add = []
+    normalised_caps = {str(c).removeprefix("CAP_") for c in cap_add}
+    dangerous_caps_added = bool(normalised_caps & _DANGEROUS_CAPS)
+
+    # No capabilities explicitly dropped
+    cap_drop_missing = not (host.get("CapDrop") or [])
+
+    # AppArmor disabled
+    apparmor_disabled = any(
+        str(o) == "apparmor=unconfined" for o in sec_opts
+    )
+
     return {
         "privileged": privileged,
         "readonly_rootfs": readonly_rootfs,
         "binds_not_readonly": binds_not_readonly,
         "seccomp_disabled": seccomp_disabled,
+        "pid_mode_is_host": pid_mode_is_host,
+        "network_mode_is_host": network_mode_is_host,
+        "ipc_mode_is_host": ipc_mode_is_host,
+        "dangerous_caps_added": dangerous_caps_added,
+        "cap_drop_missing": cap_drop_missing,
+        "apparmor_disabled": apparmor_disabled,
     }
 
 
