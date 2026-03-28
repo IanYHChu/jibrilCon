@@ -1,6 +1,39 @@
+# Archives
 /*.zip
+
+# Python
 **/__pycache__/
+**/*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Editor temp files
 **/*.bak
 **/*~
-*.egg-info/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Claude Code local state
+.claude/
+CLAUDE.md
+
+# Utility scripts (not required by the package)
+/scripts/
+
+# Test fixtures (large, generated separately)
 /tests/fixtures/
