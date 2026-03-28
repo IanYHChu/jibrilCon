@@ -40,6 +40,7 @@ _MAX_WORKERS = 8
 # Internal helpers
 # ---------------------------------------------------------------------
 
+
 def _iter_scanner_modules() -> List[ModuleType]:
     """Import every *.py file under scanners/ and yield modules."""
     pkg = importlib.import_module(_SCANNER_PKG)
@@ -51,9 +52,11 @@ def _iter_scanner_modules() -> List[ModuleType]:
         modules.append(importlib.import_module(full_name))
     return modules
 
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
+
 
 def run_scanners(
     mount_path: str,
@@ -99,7 +102,7 @@ def run_scanners(
                     results.append(res)
                 else:
                     logger.warning("Scanner %s returned non-dict result", name)
-            except Exception as exc:  # pragma: no cover
+            except (RuntimeError, OSError, TypeError, ValueError) as exc:
                 logger.error("Scanner %s raised: %s", name, exc)
 
     return results

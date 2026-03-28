@@ -9,6 +9,7 @@ from jibrilcon.util.path_utils import resolve_path, safe_join
 # safe_join
 # ------------------------------------------------------------------ #
 
+
 def test_safe_join_normal_subpath(tmp_path):
     child = tmp_path / "a" / "b"
     child.mkdir(parents=True)
@@ -35,6 +36,7 @@ def test_safe_join_root_equals_candidate(tmp_path):
 # ------------------------------------------------------------------ #
 # resolve_path
 # ------------------------------------------------------------------ #
+
 
 def test_resolve_path_non_symlink(tmp_path):
     f = tmp_path / "file.txt"

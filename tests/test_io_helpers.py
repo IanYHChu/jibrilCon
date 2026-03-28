@@ -9,6 +9,7 @@ from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
 # deep_merge
 # ------------------------------------------------------------------ #
 
+
 def test_deep_merge_non_overlapping():
     dst = {"a": 1}
     src = {"b": 2}
@@ -54,6 +55,7 @@ def test_deep_merge_empty_dst():
 # ------------------------------------------------------------------ #
 # load_json_or_empty
 # ------------------------------------------------------------------ #
+
 
 def test_load_json_or_empty_valid(tmp_path):
     f = tmp_path / "data.json"

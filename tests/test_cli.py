@@ -1,5 +1,6 @@
 """Tests for cli.py."""
 
+import gzip
 import json
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from jibrilcon.cli import _colour, main
 # ------------------------------------------------------------------ #
 # _colour helper
 # ------------------------------------------------------------------ #
+
 
 def test_colour_enabled():
     result = _colour("42", "red", enable=True)
@@ -25,6 +27,7 @@ def test_colour_disabled():
 # ------------------------------------------------------------------ #
 # main() integration
 # ------------------------------------------------------------------ #
+
 
 def test_main_nonexistent_path(capsys):
     with patch("sys.argv", ["jibrilcon", "/nonexistent_rootfs_path_xyz"]):
@@ -64,3 +67,75 @@ def test_main_output_file(make_rootfs, tmp_path):
     report = json.loads(out_file.read_text())
     assert "report" in report
     assert "summary" in report
+
+
+# ------------------------------------------------------------------ #
+# Argument validation
+# ------------------------------------------------------------------ #
+
+
+def test_main_max_workers_zero(capsys):
+    """--max-workers 0 should exit with an error (validator checks < 1)."""
+    with patch("sys.argv", ["jibrilcon", "/tmp", "--max-workers", "0"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code != 0
+
+
+def test_main_max_workers_negative(capsys):
+    """--max-workers -1 should exit with an error."""
+    with patch("sys.argv", ["jibrilcon", "/tmp", "--max-workers", "-1"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code != 0
+
+
+def test_main_invalid_log_level(capsys):
+    """An invalid --log-level value should exit with an error."""
+    with patch("sys.argv", ["jibrilcon", "/tmp", "--log-level", "banana"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code != 0
+
+
+def test_main_output_gzip(make_rootfs, tmp_path):
+    """Output with .json.gz extension produces valid gzip content."""
+    r = make_rootfs
+    cid = "gzip" * 6 + "0" * 40
+    r.add_docker_container(
+        cid,
+        config_v2={"Name": "/gztest"},
+        hostconfig={"Privileged": False, "ReadonlyRootfs": True, "Binds": []},
+    )
+    out_file = tmp_path / "report.json.gz"
+    with patch("sys.argv", ["jibrilcon", r.path, "-o", str(out_file), "--no-color"]):
+        main()
+    assert out_file.exists()
+    raw = gzip.decompress(out_file.read_bytes())
+    report = json.loads(raw)
+    assert "report" in report
+    assert "summary" in report
+
+
+def test_main_runtime_error_handled(make_rootfs, capsys):
+    """A RuntimeError from run_scan is caught and exits with code 1."""
+    r = make_rootfs
+    with patch("jibrilcon.cli.run_scan", side_effect=RuntimeError("boom")):
+        with patch("sys.argv", ["jibrilcon", r.path]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "boom" in captured.err
+
+
+def test_main_os_error_handled(make_rootfs, capsys):
+    """An OSError from run_scan is caught and exits with code 1."""
+    r = make_rootfs
+    with patch("jibrilcon.cli.run_scan", side_effect=OSError("disk fail")):
+        with patch("sys.argv", ["jibrilcon", r.path]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "disk fail" in captured.err

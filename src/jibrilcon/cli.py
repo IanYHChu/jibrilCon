@@ -16,7 +16,7 @@ Responsibilities
    :pyfunc:`util.report_writer.write_report`.
 5. Show a short colour summary for human readability.
 
-No long-running logic or scanner code should live here - keep this file 
+No long-running logic or scanner code should live here - keep this file
 focused on UX.
 """
 
@@ -36,6 +36,7 @@ from jibrilcon.util.report_writer import write_report  # handles .json or .json.
 # ---------------------------------------------------------------------
 # CLI helpers
 # ---------------------------------------------------------------------
+
 
 def _colour(val: str, colour: str, enable: bool = True) -> str:
     if not enable:
@@ -101,7 +102,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.max_workers < 1:
-        parser.error(f"--max-workers must be a positive integer, got {args.max_workers}")
+        parser.error(
+            f"--max-workers must be a positive integer, got {args.max_workers}"
+        )
 
     mount = Path(args.mount_path)
     if not mount.is_dir():
@@ -127,7 +130,7 @@ def main() -> None:
             _print_summary(report["summary"], use_color=not args.no_color)
     except KeyboardInterrupt:
         sys.exit("Interrupted by user")
-    except Exception as exc:
+    except (RuntimeError, OSError) as exc:
         logger.error("Scan failed: %s", exc, exc_info=True)
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

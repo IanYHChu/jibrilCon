@@ -25,6 +25,7 @@ def _clear_resolve_cache():
 # Binary-based detection
 # ------------------------------------------------------------------ #
 
+
 def test_detect_systemd_by_binary(tmp_path):
     """Direct /sbin/init binary containing 'systemd' -> 'systemd'."""
     sbin = tmp_path / "sbin"
@@ -77,6 +78,7 @@ def test_detect_systemd_via_usr_lib_path(tmp_path):
 # Directory-based fallback detection
 # ------------------------------------------------------------------ #
 
+
 def test_detect_systemd_by_directory(tmp_path):
     """/etc/systemd/ directory present -> fallback to 'systemd'."""
     (tmp_path / "etc" / "systemd").mkdir(parents=True)
@@ -123,6 +125,7 @@ def test_directory_priority_sysvinit_over_openrc(tmp_path):
 # Unknown / empty rootfs
 # ------------------------------------------------------------------ #
 
+
 def test_detect_unknown_empty_rootfs(tmp_path):
     """Empty rootfs with no binaries or directories -> empty string."""
     result = detect_init_system(tmp_path)
@@ -132,6 +135,7 @@ def test_detect_unknown_empty_rootfs(tmp_path):
 # ------------------------------------------------------------------ #
 # Edge cases and robustness
 # ------------------------------------------------------------------ #
+
 
 def test_truncated_elf_header(tmp_path):
     """

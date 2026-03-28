@@ -14,6 +14,7 @@ from jibrilcon.util.systemd_unit_parser import (
 # _parse_unit_lines
 # ------------------------------------------------------------------ #
 
+
 def test_parse_unit_lines_basic():
     lines = [
         "[Service]",
@@ -41,6 +42,7 @@ def test_parse_unit_lines_duplicate_keys():
 # ------------------------------------------------------------------ #
 # _is_container_service
 # ------------------------------------------------------------------ #
+
 
 def test_is_container_service_docker():
     assert _is_container_service(
@@ -84,9 +86,7 @@ def test_guess_lxc():
 
 
 def test_guess_unknown():
-    engine, cname = _guess_engine_and_container(
-        ["/usr/bin/nginx"], ENGINE_MAP
-    )
+    engine, cname = _guess_engine_and_container(["/usr/bin/nginx"], ENGINE_MAP)
     assert engine == ""
     assert cname == ""
 
@@ -95,14 +95,13 @@ def test_guess_unknown():
 # scan_systemd_container_units (integration with fixture rootfs)
 # ------------------------------------------------------------------ #
 
+
 def test_scan_finds_container_units(tmp_path):
     """Build a minimal rootfs with a docker service unit and verify parsing."""
     unit_dir = tmp_path / "etc" / "systemd" / "system"
     unit_dir.mkdir(parents=True)
     (unit_dir / "docker-web.service").write_text(
-        "[Service]\n"
-        "ExecStart=/usr/bin/docker run --name web01 nginx\n"
-        "User=appuser\n"
+        "[Service]\nExecStart=/usr/bin/docker run --name web01 nginx\nUser=appuser\n"
     )
 
     rows = scan_systemd_container_units(tmp_path)
@@ -115,6 +114,7 @@ def test_scan_finds_container_units(tmp_path):
 # ------------------------------------------------------------------ #
 # collect_systemd_containers: caches both ExecStart and ExecStartPre
 # ------------------------------------------------------------------ #
+
 
 def test_collect_caches_execstartpre(tmp_path):
     """Regression test: ExecStartPre lines must be cached in ScanContext."""
@@ -134,6 +134,4 @@ def test_collect_caches_execstartpre(tmp_path):
     assert any("-f /custom/config" in line for line in lines), (
         "ExecStartPre lines should be cached"
     )
-    assert any("-d" in line for line in lines), (
-        "ExecStart lines should be cached"
-    )
+    assert any("-d" in line for line in lines), "ExecStart lines should be cached"

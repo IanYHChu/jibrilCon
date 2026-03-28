@@ -1,4 +1,5 @@
 """Tests for report_writer and summary_utils."""
+
 import gzip
 import json
 
@@ -33,8 +34,26 @@ class TestSummaryUtils:
 
     def test_merge_multiple_scanners(self):
         results = [
-            {"scanner": "docker", "summary": {"docker_scanned": 2, "alerts": 1, "warnings": 0, "elapsed": 0.1}, "results": [{"status": "violated"}, {"status": "clean"}]},
-            {"scanner": "podman", "summary": {"podman_scanned": 1, "alerts": 0, "warnings": 1, "elapsed": 0.2}, "results": [{"status": "violated"}]},
+            {
+                "scanner": "docker",
+                "summary": {
+                    "docker_scanned": 2,
+                    "alerts": 1,
+                    "warnings": 0,
+                    "elapsed": 0.1,
+                },
+                "results": [{"status": "violated"}, {"status": "clean"}],
+            },
+            {
+                "scanner": "podman",
+                "summary": {
+                    "podman_scanned": 1,
+                    "alerts": 0,
+                    "warnings": 1,
+                    "elapsed": 0.2,
+                },
+                "results": [{"status": "violated"}],
+            },
         ]
         report = generate_final_report(results)
         s = report["summary"]
@@ -46,7 +65,11 @@ class TestSummaryUtils:
 
     def test_missing_status_counted_as_violated(self):
         results = [
-            {"scanner": "test", "summary": {"alerts": 0}, "results": [{"status": None}]},
+            {
+                "scanner": "test",
+                "summary": {"alerts": 0},
+                "results": [{"status": None}],
+            },
         ]
         report = generate_final_report(results)
         assert report["summary"]["violated"] == 1

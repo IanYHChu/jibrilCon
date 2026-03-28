@@ -19,6 +19,7 @@ from jibrilcon.util.context import ScanContext
 # Helpers
 # ------------------------------------------------------------------ #
 
+
 def _make_context() -> ScanContext:
     ctx = ScanContext()
     ctx.init_system = "systemd"
@@ -29,8 +30,8 @@ def _make_context() -> ScanContext:
 # 1. CLI: run_scan raises RuntimeError -> sys.exit(1)
 # ------------------------------------------------------------------ #
 
-class TestCliScanFailure:
 
+class TestCliScanFailure:
     def test_cli_scan_failure_exits_nonzero(self, tmp_path):
         """If run_scan raises RuntimeError, main() must call sys.exit(1)."""
         # Create a valid directory so argparse path validation passes
@@ -55,8 +56,8 @@ class TestCliScanFailure:
 # 2. config_loader: thread-safety of load_json_config
 # ------------------------------------------------------------------ #
 
-class TestConfigLoaderThreadSafety:
 
+class TestConfigLoaderThreadSafety:
     @pytest.fixture(autouse=True)
     def _fresh_cache(self):
         clear_cache()
@@ -136,8 +137,8 @@ class TestConfigLoaderThreadSafety:
 # 3. systemd_unit_parser: missing config graceful handling
 # ------------------------------------------------------------------ #
 
-class TestSystemdCollectGraceful:
 
+class TestSystemdCollectGraceful:
     def test_systemd_collect_graceful_on_missing_config(self, tmp_path):
         """collect_systemd_containers must not crash when the systemd.json
         config file is missing; it should return normally with no side
@@ -152,9 +153,7 @@ class TestSystemdCollectGraceful:
         bogus_filter = tmp_path / "nonexistent_systemd.json"
 
         # Must not raise
-        collect_systemd_containers(
-            str(rootfs), ctx, filters_path=bogus_filter
-        )
+        collect_systemd_containers(str(rootfs), ctx, filters_path=bogus_filter)
 
         # Context should remain empty
         assert not ctx.is_systemd_started("docker", "any")
@@ -165,8 +164,8 @@ class TestSystemdCollectGraceful:
 # 4. LXC: include depth limit
 # ------------------------------------------------------------------ #
 
-class TestLxcIncludeDepthLimit:
 
+class TestLxcIncludeDepthLimit:
     def test_lxc_include_depth_limit(self, tmp_path):
         """A chain of >20 lxc.include files must not stack-overflow;
         _file_contains_rootfs should return False at the depth limit."""
@@ -209,8 +208,8 @@ class TestLxcIncludeDepthLimit:
 # 5. LXC: rules load failure
 # ------------------------------------------------------------------ #
 
-class TestLxcRulesLoadFailure:
 
+class TestLxcRulesLoadFailure:
     def test_lxc_rules_load_failure(self, make_rootfs):
         """If load_json_config raises ConfigLoadError for the LXC rule
         file, scan() must return a valid result dict, not crash."""
@@ -237,8 +236,8 @@ class TestLxcRulesLoadFailure:
 # 6. Docker: rules load failure
 # ------------------------------------------------------------------ #
 
-class TestDockerRulesLoadFailure:
 
+class TestDockerRulesLoadFailure:
     def test_docker_rules_load_failure(self, make_rootfs):
         """If load_json_config raises ConfigLoadError for the Docker rule
         file, scan() must return a valid result dict, not crash."""
@@ -265,8 +264,8 @@ class TestDockerRulesLoadFailure:
 # 7. Podman: rules load failure
 # ------------------------------------------------------------------ #
 
-class TestPodmanRulesLoadFailure:
 
+class TestPodmanRulesLoadFailure:
     def test_podman_rules_load_failure(self, make_rootfs):
         """If load_json_config raises ConfigLoadError for the Podman rule
         file, scan() must return a valid result dict, not crash."""

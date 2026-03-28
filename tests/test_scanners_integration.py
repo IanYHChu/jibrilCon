@@ -11,6 +11,7 @@ from jibrilcon.scanners import docker_native, lxc, podman
 # Helpers
 # ------------------------------------------------------------------ #
 
+
 def _make_context() -> ScanContext:
     ctx = ScanContext()
     ctx.init_system = "systemd"
@@ -21,8 +22,8 @@ def _make_context() -> ScanContext:
 # Docker scanner
 # ------------------------------------------------------------------ #
 
-class TestDockerScanner:
 
+class TestDockerScanner:
     def test_clean_container(self, make_rootfs):
         r = make_rootfs
         cid = "aaa" * 8 + "0" * 40
@@ -72,7 +73,9 @@ class TestDockerScanner:
         )
         ctx = _make_context()
         result = docker_native.scan(r.path, context=ctx)
-        priv = [v for v in result["results"][0]["violations"] if v["id"] == "privileged"][0]
+        priv = [
+            v for v in result["results"][0]["violations"] if v["id"] == "privileged"
+        ][0]
 
         # Enriched fields present
         assert "severity" in priv
@@ -129,14 +132,27 @@ class TestDockerScanner:
         r = make_rootfs
         r.add_passwd(["testuser:x:1000:1000:Test User:/home/testuser:/bin/bash"])
         cid = "ccc" * 8 + "0" * 40
-        base = Path(r.path) / "home" / "testuser" / ".local" / "share" / "docker" / "containers" / cid
+        base = (
+            Path(r.path)
+            / "home"
+            / "testuser"
+            / ".local"
+            / "share"
+            / "docker"
+            / "containers"
+            / cid
+        )
         base.mkdir(parents=True, exist_ok=True)
         (base / "config.v2.json").write_text(json.dumps({"Name": "/rootless"}))
-        (base / "hostconfig.json").write_text(json.dumps({
-            "Privileged": True,
-            "ReadonlyRootfs": False,
-            "Binds": [],
-        }))
+        (base / "hostconfig.json").write_text(
+            json.dumps(
+                {
+                    "Privileged": True,
+                    "ReadonlyRootfs": False,
+                    "Binds": [],
+                }
+            )
+        )
         ctx = _make_context()
         result = docker_native.scan(r.path, context=ctx)
         assert result["summary"]["docker_scanned"] >= 1
@@ -224,20 +240,35 @@ class TestDockerScanner:
     def test_passwd_path_traversal_rejected(self, make_rootfs):
         """Malicious passwd home dirs with ../ must not escape rootfs."""
         r = make_rootfs
-        r.add_passwd([
-            "legit:x:1000:1000:Legit:/home/legit:/bin/bash",
-            "evil:x:1001:1001:Evil:/home/../../etc:/bin/bash",
-        ])
+        r.add_passwd(
+            [
+                "legit:x:1000:1000:Legit:/home/legit:/bin/bash",
+                "evil:x:1001:1001:Evil:/home/../../etc:/bin/bash",
+            ]
+        )
         # Place a docker dir under the legitimate home only
         cid = "hhh" * 8 + "0" * 40
-        base = Path(r.path) / "home" / "legit" / ".local" / "share" / "docker" / "containers" / cid
+        base = (
+            Path(r.path)
+            / "home"
+            / "legit"
+            / ".local"
+            / "share"
+            / "docker"
+            / "containers"
+            / cid
+        )
         base.mkdir(parents=True, exist_ok=True)
         (base / "config.v2.json").write_text(json.dumps({"Name": "/legit"}))
-        (base / "hostconfig.json").write_text(json.dumps({
-            "Privileged": False,
-            "ReadonlyRootfs": True,
-            "Binds": [],
-        }))
+        (base / "hostconfig.json").write_text(
+            json.dumps(
+                {
+                    "Privileged": False,
+                    "ReadonlyRootfs": True,
+                    "Binds": [],
+                }
+            )
+        )
         ctx = _make_context()
         result = docker_native.scan(r.path, context=ctx)
         # The legitimate container should still be found
@@ -455,7 +486,10 @@ class TestDockerScanner:
                 "IpcMode": "",
                 "CapAdd": [],
                 "CapDrop": ["ALL"],
-                "SecurityOpt": ["apparmor=docker-default", "seccomp=/path/to/profile.json"],
+                "SecurityOpt": [
+                    "apparmor=docker-default",
+                    "seccomp=/path/to/profile.json",
+                ],
             },
         )
         ctx = _make_context()
@@ -470,8 +504,8 @@ class TestDockerScanner:
 # Podman scanner
 # ------------------------------------------------------------------ #
 
-class TestPodmanScanner:
 
+class TestPodmanScanner:
     def test_root_uid_alert(self, make_rootfs):
         r = make_rootfs
         cid = "pod" * 8 + "0" * 40
@@ -625,26 +659,40 @@ class TestPodmanScanner:
     def test_passwd_path_traversal_rejected(self, make_rootfs):
         """Malicious passwd home dirs with ../ must not escape rootfs."""
         r = make_rootfs
-        r.add_passwd([
-            "legit:x:1000:1000:Legit:/home/legit:/bin/bash",
-            "evil:x:1001:1001:Evil:/home/../../etc:/bin/bash",
-        ])
+        r.add_passwd(
+            [
+                "legit:x:1000:1000:Legit:/home/legit:/bin/bash",
+                "evil:x:1001:1001:Evil:/home/../../etc:/bin/bash",
+            ]
+        )
         # Place a podman storage dir under the legitimate home only
         cid = "pod" * 8 + "6" * 40
-        sr = Path(r.path) / "home" / "legit" / ".local" / "share" / "containers" / "storage"
+        sr = (
+            Path(r.path)
+            / "home"
+            / "legit"
+            / ".local"
+            / "share"
+            / "containers"
+            / "storage"
+        )
         index = sr / "overlay-containers" / "containers.json"
         index.parent.mkdir(parents=True, exist_ok=True)
         index.write_text(json.dumps([{"id": cid, "names": ["legitpod"]}]))
         cfg_dir = sr / "overlay-containers" / cid / "userdata"
         cfg_dir.mkdir(parents=True, exist_ok=True)
-        (cfg_dir / "config.json").write_text(json.dumps({
-            "process": {
-                "user": {"uid": 1000},
-                "capabilities": {"bounding": []},
-            },
-            "mounts": [],
-            "linux": {"readonlyPaths": ["/proc"]},
-        }))
+        (cfg_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "process": {
+                        "user": {"uid": 1000},
+                        "capabilities": {"bounding": []},
+                    },
+                    "mounts": [],
+                    "linux": {"readonlyPaths": ["/proc"]},
+                }
+            )
+        )
         ctx = _make_context()
         result = podman.scan(r.path, context=ctx)
         # The legitimate container should still be found
@@ -971,8 +1019,8 @@ class TestPodmanScanner:
 # LXC scanner
 # ------------------------------------------------------------------ #
 
-class TestLxcScanner:
 
+class TestLxcScanner:
     _CLEAN_CONFIG = (
         "lxc.rootfs.path = /var/lib/lxc/clean/rootfs\n"
         "lxc.idmap = u 0 100000 65536\n"
@@ -1129,7 +1177,9 @@ class TestLxcScanner:
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "cap_drop_missing" in vio_ids
         # cap_drop_missing should now be an alert with severity 7.0
-        cap_vio = [v for v in containers[0]["violations"] if v["id"] == "cap_drop_missing"][0]
+        cap_vio = [
+            v for v in containers[0]["violations"] if v["id"] == "cap_drop_missing"
+        ][0]
         assert cap_vio["type"] == "alert"
         assert cap_vio["severity"] == 7.0
 
@@ -1171,7 +1221,9 @@ class TestLxcScanner:
         assert len(containers) == 1
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "apparmor_disabled" in vio_ids
-        aa_vio = [v for v in containers[0]["violations"] if v["id"] == "apparmor_disabled"][0]
+        aa_vio = [
+            v for v in containers[0]["violations"] if v["id"] == "apparmor_disabled"
+        ][0]
         assert aa_vio["type"] == "warning"
         assert aa_vio["severity"] == 6.0
 
@@ -1213,7 +1265,9 @@ class TestLxcScanner:
         assert len(containers) == 1
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "host_network" in vio_ids
-        net_vio = [v for v in containers[0]["violations"] if v["id"] == "host_network"][0]
+        net_vio = [v for v in containers[0]["violations"] if v["id"] == "host_network"][
+            0
+        ]
         assert net_vio["type"] == "alert"
         assert net_vio["severity"] == 7.5
 
@@ -1271,7 +1325,11 @@ class TestLxcScanner:
 
         containers = result["results"]
         assert len(containers) == 1
-        usr_vio = [v for v in containers[0]["violations"] if v["id"] == "mount_usr_should_be_ro"][0]
+        usr_vio = [
+            v
+            for v in containers[0]["violations"]
+            if v["id"] == "mount_usr_should_be_ro"
+        ][0]
         assert usr_vio["severity"] == 5.5
         assert usr_vio["type"] == "warning"
 
@@ -1280,8 +1338,8 @@ class TestLxcScanner:
 # Full pipeline (core.run_scan)
 # ------------------------------------------------------------------ #
 
-class TestFullPipeline:
 
+class TestFullPipeline:
     def test_run_scan_returns_valid_report(self, make_rootfs):
         """Verify that core.run_scan produces a well-structured report."""
         from jibrilcon.core import run_scan

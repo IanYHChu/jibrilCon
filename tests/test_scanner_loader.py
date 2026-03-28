@@ -14,6 +14,7 @@ from jibrilcon.util.scanner_loader import run_scanners
 # Helpers
 # ------------------------------------------------------------------ #
 
+
 def _make_scanner_module(name: str, scan_fn) -> ModuleType:
     """Build a minimal ModuleType with a scan() callable."""
     mod = ModuleType(name)
@@ -95,9 +96,7 @@ def test_scanner_non_dict_result_filtered(mock_iter, caplog):
     assert len(results) == 1
     assert results[0]["scanner"] == "valid"
 
-    non_dict_warnings = [
-        r for r in caplog.records if "non-dict result" in r.message
-    ]
+    non_dict_warnings = [r for r in caplog.records if "non-dict result" in r.message]
     assert len(non_dict_warnings) == 2
 
 
@@ -122,8 +121,7 @@ def test_max_workers_parameter(mock_iter, mock_executor_cls):
 
     # Add more scanners so min(3, N) = 3
     mock_iter.return_value = [
-        _make_scanner_module(f"jibrilcon.scanners.s{i}", scan_fn)
-        for i in range(5)
+        _make_scanner_module(f"jibrilcon.scanners.s{i}", scan_fn) for i in range(5)
     ]
 
     run_scanners("/fake/rootfs", context=ScanContext(), max_workers=3)

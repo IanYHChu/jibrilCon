@@ -9,6 +9,7 @@ from jibrilcon.util.rules_engine import evaluate_rules
 # P0 regression: returned dicts must be independent copies
 # ------------------------------------------------------------------ #
 
+
 def test_returned_dicts_are_independent_copies():
     """Mutating a returned violation must NOT affect subsequent calls."""
     rules = [
@@ -58,12 +59,21 @@ def test_original_rules_list_unchanged_after_evaluation():
 # Basic matching
 # ------------------------------------------------------------------ #
 
+
 def test_matching_rule_returned():
     rules = [
-        {"id": "r1", "type": "alert", "logic": "and",
-         "conditions": [{"field": "x", "operator": "equals", "value": 1}]},
-        {"id": "r2", "type": "warning", "logic": "and",
-         "conditions": [{"field": "x", "operator": "equals", "value": 99}]},
+        {
+            "id": "r1",
+            "type": "alert",
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": 1}],
+        },
+        {
+            "id": "r2",
+            "type": "warning",
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": 99}],
+        },
     ]
     matched = evaluate_rules({"x": 1}, rules)
     ids = [m["id"] for m in matched]
@@ -72,8 +82,12 @@ def test_matching_rule_returned():
 
 def test_no_match_returns_empty():
     rules = [
-        {"id": "r1", "type": "alert", "logic": "and",
-         "conditions": [{"field": "x", "operator": "equals", "value": 999}]},
+        {
+            "id": "r1",
+            "type": "alert",
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": 999}],
+        },
     ]
     assert evaluate_rules({"x": 1}, rules) == []
 
@@ -84,8 +98,12 @@ def test_empty_rules():
 
 def test_empty_data():
     rules = [
-        {"id": "r1", "type": "alert", "logic": "and",
-         "conditions": [{"field": "x", "operator": "equals", "value": 1}]},
+        {
+            "id": "r1",
+            "type": "alert",
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": 1}],
+        },
     ]
     assert evaluate_rules({}, rules) == []
 
@@ -94,13 +112,18 @@ def test_empty_data():
 # Logic: AND / OR
 # ------------------------------------------------------------------ #
 
+
 def test_and_logic_all_must_match():
     rules = [
-        {"id": "r1", "type": "alert", "logic": "and",
-         "conditions": [
-             {"field": "a", "operator": "equals", "value": 1},
-             {"field": "b", "operator": "equals", "value": 2},
-         ]},
+        {
+            "id": "r1",
+            "type": "alert",
+            "logic": "and",
+            "conditions": [
+                {"field": "a", "operator": "equals", "value": 1},
+                {"field": "b", "operator": "equals", "value": 2},
+            ],
+        },
     ]
     assert len(evaluate_rules({"a": 1, "b": 2}, rules)) == 1
     assert len(evaluate_rules({"a": 1, "b": 999}, rules)) == 0
@@ -108,11 +131,15 @@ def test_and_logic_all_must_match():
 
 def test_or_logic_any_can_match():
     rules = [
-        {"id": "r1", "type": "alert", "logic": "or",
-         "conditions": [
-             {"field": "a", "operator": "equals", "value": 1},
-             {"field": "b", "operator": "equals", "value": 2},
-         ]},
+        {
+            "id": "r1",
+            "type": "alert",
+            "logic": "or",
+            "conditions": [
+                {"field": "a", "operator": "equals", "value": 1},
+                {"field": "b", "operator": "equals", "value": 2},
+            ],
+        },
     ]
     assert len(evaluate_rules({"a": 1, "b": 999}, rules)) == 1
     assert len(evaluate_rules({"a": 999, "b": 999}, rules)) == 0
@@ -121,6 +148,7 @@ def test_or_logic_any_can_match():
 # ------------------------------------------------------------------ #
 # Operators
 # ------------------------------------------------------------------ #
+
 
 def test_operator_not_equals():
     rules = [_rule("not_equals", "x", 1)]
@@ -208,10 +236,16 @@ def test_operator_not_regex_match_none_field():
 
 def test_empty_conditions_always_false():
     rule_and = {
-        "id": "empty_and", "type": "alert", "logic": "and", "conditions": [],
+        "id": "empty_and",
+        "type": "alert",
+        "logic": "and",
+        "conditions": [],
     }
     rule_or = {
-        "id": "empty_or", "type": "alert", "logic": "or", "conditions": [],
+        "id": "empty_or",
+        "type": "alert",
+        "logic": "or",
+        "conditions": [],
     }
     assert evaluate_rules({"x": 1}, [rule_and]) == []
     assert evaluate_rules({"x": 1}, [rule_or]) == []
@@ -220,6 +254,7 @@ def test_empty_conditions_always_false():
 # ------------------------------------------------------------------ #
 # Helper
 # ------------------------------------------------------------------ #
+
 
 def _rule(operator: str, field: str = "x", value=None):
     return {
