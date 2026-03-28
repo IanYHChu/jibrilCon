@@ -132,13 +132,10 @@ _NESTED_QUANTIFIER_RE = re.compile(
 def _validate_regex(pattern: str) -> None:
     """Raise ValueError if *pattern* looks dangerous or too long."""
     if len(pattern) > _MAX_REGEX_LEN:
-        raise ValueError(
-            f"Regex pattern exceeds {_MAX_REGEX_LEN} characters"
-        )
+        raise ValueError(f"Regex pattern exceeds {_MAX_REGEX_LEN} characters")
     if _NESTED_QUANTIFIER_RE.search(pattern):
         raise ValueError(
-            f"Regex pattern contains nested quantifiers (potential ReDoS): "
-            f"{pattern!r}"
+            f"Regex pattern contains nested quantifiers (potential ReDoS): {pattern!r}"
         )
 
 
