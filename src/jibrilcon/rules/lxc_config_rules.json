@@ -80,8 +80,8 @@
     },
     {
       "id": "cap_drop_missing",
-      "type": "warning",
-      "severity": 5.0,
+      "type": "alert",
+      "severity": 7.0,
       "description": "No capabilities are dropped (lxc.cap.drop not set)",
       "risk": "The container retains all default Linux capabilities. Capabilities such as CAP_NET_RAW, CAP_SYS_PTRACE increase the attack surface.",
       "remediation": "Add 'lxc.cap.drop = <capability_list>' to drop unnecessary capabilities. Consider dropping all and adding back only required ones.",
@@ -160,7 +160,7 @@
     {
       "id": "mount_usr_should_be_ro",
       "type": "warning",
-      "severity": 4.0,
+      "severity": 5.5,
       "description": "Mounting /usr should be readonly",
       "risk": "A writable /usr mount allows the container to replace host system binaries, enabling backdoor installation or supply-chain attacks.",
       "remediation": "Add 'ro' to the mount options for the /usr mount entry.",
@@ -224,6 +224,50 @@
           "field": "runs_as_root",
           "operator": "equals",
           "value": true
+        }
+      ]
+    },
+    {
+      "id": "apparmor_disabled",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "AppArmor profile is set to unconfined",
+      "risk": "Disabling AppArmor removes mandatory access control enforcement, allowing the container process unrestricted access to system resources within its namespace.",
+      "remediation": "Remove 'lxc.apparmor.profile = unconfined'. Use the default AppArmor profile or provide a custom profile tailored to the workload.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apparmor_profile",
+          "operator": "equals",
+          "value": "unconfined"
+        }
+      ]
+    },
+    {
+      "id": "host_network",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "Container shares the host network namespace",
+      "risk": "Host network namespace sharing gives the container full access to the host network stack, including listening on privileged ports, sniffing traffic, and bypassing network-level container isolation.",
+      "remediation": "Set 'lxc.net.0.type' to 'veth' or another isolated network type instead of 'host' or 'none'.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "or",
+      "conditions": [
+        {
+          "field": "net_type",
+          "operator": "equals",
+          "value": "host"
+        },
+        {
+          "field": "net_type",
+          "operator": "not_exists"
         }
       ]
     }

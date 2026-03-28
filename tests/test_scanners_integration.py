@@ -978,17 +978,20 @@ class TestLxcScanner:
         "lxc.idmap = u 0 100000 65536\n"
         "lxc.idmap = g 0 100000 65536\n"
         "lxc.cap.drop = sys_admin net_raw\n"
+        "lxc.net.0.type = veth\n"
     )
 
     _MISSING_IDMAP_CONFIG = (
         "lxc.rootfs.path = /var/lib/lxc/noidmap/rootfs\n"
         "lxc.cap.drop = sys_admin\n"
+        "lxc.net.0.type = veth\n"
     )
 
     _INVALID_IDMAP_CONFIG = (
         "lxc.rootfs.path = /var/lib/lxc/badmap/rootfs\n"
         "lxc.idmap = u garbage_format\n"
         "lxc.idmap = g 0 100000 65536\n"
+        "lxc.net.0.type = veth\n"
     )
 
     _DANGEROUS_MOUNT_CONFIG = (
@@ -996,6 +999,7 @@ class TestLxcScanner:
         "lxc.idmap = u 0 100000 65536\n"
         "lxc.idmap = g 0 100000 65536\n"
         "lxc.cap.drop = sys_admin\n"
+        "lxc.net.0.type = veth\n"
         "lxc.mount.entry = /proc proc proc rw 0 0\n"
     )
 
@@ -1058,6 +1062,7 @@ class TestLxcScanner:
             "lxc.idmap = u 0 100000 65536\n"
             "lxc.idmap = g 0 100000 65536\n"
             "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
             "lxc.mount.entry = /sys sysfs sysfs rw 0 0\n"
         )
         r.add_lxc_config("sysmnt", config)
@@ -1076,6 +1081,7 @@ class TestLxcScanner:
             "lxc.idmap = u 0 100000 65536\n"
             "lxc.idmap = g 0 100000 65536\n"
             "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
             "lxc.mount.entry = /run tmpfs tmpfs rw 0 0\n"
         )
         r.add_lxc_config("runmnt", config)
@@ -1094,6 +1100,7 @@ class TestLxcScanner:
             "lxc.idmap = u 0 100000 65536\n"
             "lxc.idmap = g 0 100000 65536\n"
             "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
             "lxc.mount.entry = /usr usr none rw,bind 0 0\n"
         )
         r.add_lxc_config("usrmnt", config)
@@ -1111,6 +1118,7 @@ class TestLxcScanner:
             "lxc.rootfs.path = /var/lib/lxc/nocap/rootfs\n"
             "lxc.idmap = u 0 100000 65536\n"
             "lxc.idmap = g 0 100000 65536\n"
+            "lxc.net.0.type = veth\n"
         )
         r.add_lxc_config("nocap", config)
         ctx = _make_context()
@@ -1120,6 +1128,10 @@ class TestLxcScanner:
         assert len(containers) == 1
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "cap_drop_missing" in vio_ids
+        # cap_drop_missing should now be an alert with severity 7.0
+        cap_vio = [v for v in containers[0]["violations"] if v["id"] == "cap_drop_missing"][0]
+        assert cap_vio["type"] == "alert"
+        assert cap_vio["severity"] == 7.0
 
     def test_mount_dev_not_readonly(self, make_rootfs):
         r = make_rootfs
@@ -1128,6 +1140,7 @@ class TestLxcScanner:
             "lxc.idmap = u 0 100000 65536\n"
             "lxc.idmap = g 0 100000 65536\n"
             "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
             "lxc.mount.entry = /dev tmpfs tmpfs rw 0 0\n"
         )
         r.add_lxc_config("devmnt", config)
@@ -1138,6 +1151,129 @@ class TestLxcScanner:
         assert len(containers) == 1
         vio_ids = [v["id"] for v in containers[0]["violations"]]
         assert "mount_dev_should_be_ro" in vio_ids
+
+    def test_apparmor_disabled_lxc(self, make_rootfs):
+        """AppArmor set to unconfined should trigger apparmor_disabled."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/noaa/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.apparmor.profile = unconfined\n"
+        )
+        r.add_lxc_config("noaa", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "apparmor_disabled" in vio_ids
+        aa_vio = [v for v in containers[0]["violations"] if v["id"] == "apparmor_disabled"][0]
+        assert aa_vio["type"] == "warning"
+        assert aa_vio["severity"] == 6.0
+
+    def test_apparmor_with_profile_not_flagged_lxc(self, make_rootfs):
+        """A custom AppArmor profile should not trigger the rule."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/hasaa/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.apparmor.profile = lxc-container-default\n"
+        )
+        r.add_lxc_config("hasaa", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "apparmor_disabled" not in vio_ids
+
+    def test_host_network_lxc(self, make_rootfs):
+        """lxc.net.0.type = host should trigger host_network."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/hostnet/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = host\n"
+        )
+        r.add_lxc_config("hostnet", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "host_network" in vio_ids
+        net_vio = [v for v in containers[0]["violations"] if v["id"] == "host_network"][0]
+        assert net_vio["type"] == "alert"
+        assert net_vio["severity"] == 7.5
+
+    def test_host_network_missing_net_type_lxc(self, make_rootfs):
+        """Missing lxc.net.0.type (no networking config) should trigger host_network."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nonet/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+        )
+        r.add_lxc_config("nonet", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "host_network" in vio_ids
+
+    def test_isolated_network_not_flagged_lxc(self, make_rootfs):
+        """lxc.net.0.type = veth should not trigger host_network."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/vethnet/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("vethnet", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "host_network" not in vio_ids
+
+    def test_mount_usr_severity_updated(self, make_rootfs):
+        """Verify mount_usr_should_be_ro severity was updated to 5.5."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/usrsev/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.mount.entry = /usr usr none rw,bind 0 0\n"
+        )
+        r.add_lxc_config("usrsev", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+
+        containers = result["results"]
+        assert len(containers) == 1
+        usr_vio = [v for v in containers[0]["violations"] if v["id"] == "mount_usr_should_be_ro"][0]
+        assert usr_vio["severity"] == 5.5
+        assert usr_vio["type"] == "warning"
 
 
 # ------------------------------------------------------------------ #

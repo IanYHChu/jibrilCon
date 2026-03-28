@@ -35,6 +35,8 @@ from jibrilcon.util.config_loader import ConfigLoadError, load_json_config
 from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.io_helpers import deep_merge, load_json_or_empty
+from jibrilcon.util.passwd_utils import get_user_home_dirs
+from jibrilcon.util.violation_utils import process_violations
 
 logger = logging.getLogger(__name__)
 
@@ -99,26 +101,10 @@ def _get_podman_data_root(rootfs: str) -> str:
 
 def _get_user_podman_roots(rootfs: str) -> List[str]:
     """Return rootless Podman storage directories under each user's home."""
-    roots: List[str] = []
-    passwd = os.path.join(rootfs, "etc/passwd")
-    if not os.path.exists(passwd):
-        return roots
-
-    with open(passwd, encoding="utf-8") as fh:
-        for line in fh:
-            parts = line.strip().split(":")
-            if len(parts) >= 6:
-                home = parts[5].strip()
-                if home:
-                    try:
-                        safe_home = safe_join(rootfs, home.lstrip("/"), ".local/share/containers/storage")
-                        roots.append(str(safe_home))
-                    except ValueError:
-                        logger.warning(
-                            "Skipping passwd home directory that escapes rootfs: %s",
-                            home,
-                        )
-    return roots
+    return [
+        os.path.join(home, ".local/share/containers/storage")
+        for home in get_user_home_dirs(rootfs)
+    ]
 
 def _discover_configs(rootfs: str) -> List[Tuple[str, str]]:
     """
@@ -295,23 +281,21 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, Any]:
         data["service_user_missing"] = context.is_user_missing(name)
 
         vios_raw = evaluate_rules(data, rules)
-        vios = []
-        for v in vios_raw:
-            used_fields = {c.get("field") for c in v.get("conditions", []) if c.get("field")}
-            v["source"] = "/" + os.path.relpath(cfg_path, mount_path)
-            v["lines"] = []
+
+        def _resolve_lines(_v, used_fields):
+            lines = []
             for f in used_fields:
                 cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
                 val = cfg_json
                 for part in cfg_key.split("."):
                     val = val.get(part, {}) if isinstance(val, dict) else {}
                 if val:
-                    v["lines"].append(f"{cfg_key} = {val}")
+                    lines.append(f"{cfg_key} = {val}")
                 else:
-                    v["lines"].append(f"<missing> {cfg_key}")
-            v.pop("conditions", None)
-            v.pop("logic", None)
-            vios.append(v)
+                    lines.append(f"<missing> {cfg_key}")
+            return lines
+
+        vios = process_violations(vios_raw, cfg_path, mount_path, _resolve_lines)
 
         status = "violated" if vios else "clean"
         if any(v["type"] == "alert" for v in vios):

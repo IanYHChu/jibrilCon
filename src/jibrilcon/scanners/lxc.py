@@ -36,6 +36,7 @@ from jibrilcon.util.context import ScanContext
 from jibrilcon.util.rules_engine import evaluate_rules
 from jibrilcon.util.path_utils import safe_join
 from jibrilcon.util.systemd_unit_parser import scan_systemd_container_units
+from jibrilcon.util.violation_utils import process_violations
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ _FIELD_TO_CONFIG_KEY = {
     "cap_drop": "lxc.cap.drop",
     "source": "lxc.mount.entry",
     "options": "lxc.mount.entry",
+    "apparmor_profile": "lxc.apparmor.profile",
+    "net_type": "lxc.net.0.type",
 }
 
 # ---------------------------------------------------------------------
@@ -294,6 +297,21 @@ def _extract_cap_drop(entries: Dict[str, List[str]]) -> Dict[str, List[str]]:
     return {"cap_drop": drops or None}
 
 
+def _extract_apparmor_profile(entries: Dict[str, List[str]]) -> Dict[str, str | None]:
+    """Return the AppArmor profile if set."""
+    vals = entries.get("lxc.apparmor.profile", [])
+    # Last value wins (LXC config override semantics)
+    profile = vals[-1].strip() if vals else None
+    return {"apparmor_profile": profile}
+
+
+def _extract_net_type(entries: Dict[str, List[str]]) -> Dict[str, str | None]:
+    """Return the network type for the primary interface (lxc.net.0.type)."""
+    vals = entries.get("lxc.net.0.type", [])
+    net_type = vals[-1].strip() if vals else None
+    return {"net_type": net_type}
+
+
 def _parse_mount_entry(entry: str) -> Dict[str, str]:
     """
     Given a single ``lxc.mount.entry`` line, return mapping:
@@ -375,31 +393,33 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
 
         idmap_info = _extract_idmap(entries)
         capdrop_info = _extract_cap_drop(entries)
+        apparmor_info = _extract_apparmor_profile(entries)
+        net_info = _extract_net_type(entries)
 
         # infer runs_as_root from context or missing mappings
         systemd_root = context.is_systemd_started("lxc", container_name) and context.is_user_missing(container_name)
         mapping_root = idmap_info.get("uidmap") is None and idmap_info.get("gidmap") is None
         runs_as_root = systemd_root or mapping_root
 
-        base_data = {**idmap_info, **capdrop_info, "runs_as_root": runs_as_root}
+        base_data = {**idmap_info, **capdrop_info, **apparmor_info, **net_info, "runs_as_root": runs_as_root}
 
         # ------------------ config rules ------------------
         config_vios_raw = evaluate_rules(base_data, config_rules)
-        config_vios = []
-        for v in config_vios_raw:
-            used_fields = {c.get("field") for c in v.get("conditions", []) if c.get("field")}
-            v["source"] = "/" + os.path.relpath(cfg_path, mount_path)
-            v["lines"] = []
+
+        def _resolve_config_lines(_v, used_fields):
+            lines = []
             for f in used_fields:
                 cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
                 raw_lines = entries.get(cfg_key)
                 if raw_lines:
-                    v["lines"].extend(raw_lines)
+                    lines.extend(raw_lines)
                 else:
-                    v["lines"].append(f"<missing> {cfg_key}")
-            v.pop("conditions", None)
-            v.pop("logic", None)
-            config_vios.append(v)
+                    lines.append(f"<missing> {cfg_key}")
+            return lines
+
+        config_vios = process_violations(
+            config_vios_raw, str(cfg_path), mount_path, _resolve_config_lines,
+        )
 
         # ------------------ mount rules -------------------
         mount_results = []
@@ -408,17 +428,16 @@ def scan(mount_path: str, context: ScanContext | None = None) -> Dict[str, objec
                 continue
             mentry = _parse_mount_entry(line)
             vios_raw = evaluate_rules(mentry, mount_rules)
-            vios = []
-            for v in vios_raw:
-                used_fields = {c.get("field") for c in v.get("conditions", []) if c.get("field")}
-                v["source"] = "/" + os.path.relpath(cfg_path, mount_path)
-                v["lines"] = [line] if line else []
+
+            def _resolve_mount_lines(_v, used_fields, _line=line):
+                lines = [_line] if _line else []
                 for f in used_fields - {"source", "options"}:
-                    v["lines"].append(f"<missing> {f}")
-                v.pop("conditions", None)
-                v.pop("logic", None)
-                vios.append(v)
-            mount_results.extend(vios)
+                    lines.append(f"<missing> {f}")
+                return lines
+
+            mount_results.extend(
+                process_violations(vios_raw, str(cfg_path), mount_path, _resolve_mount_lines)
+            )
 
         all_vios = config_vios + mount_results
         status = "violated" if all_vios else "clean"
