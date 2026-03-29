@@ -43,6 +43,7 @@ spec:
   containers:
   - name: app
     image: myapp:v1.0.0
+    imagePullPolicy: Always
     securityContext:
       privileged: false
       runAsNonRoot: true
@@ -369,6 +370,7 @@ spec:
   containers:
   - name: b
     image: app-b:v1
+    imagePullPolicy: Always
     securityContext:
       privileged: false
       runAsNonRoot: true
@@ -468,6 +470,7 @@ spec:
   containers:
   - name: app
     image: myapp:v1
+    imagePullPolicy: Always
     securityContext:
       runAsNonRoot: true
       runAsUser: 1000
@@ -953,6 +956,7 @@ spec:
   containers:
   - name: app
     image: myapp:v1.0@sha256:abcdef1234567890
+    imagePullPolicy: Always
     securityContext:
       runAsNonRoot: true
       runAsUser: 1000
@@ -1292,6 +1296,133 @@ spec:
         assert "share_process_namespace" not in vio_ids
 
 
+# ------------------------------------------------------------------ #
+# imagePullPolicy
+# ------------------------------------------------------------------ #
+
+
+class TestImagePullPolicy:
+    def test_image_pull_not_always(self, tmp_path):
+        """imagePullPolicy: IfNotPresent should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "cached.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cached-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1.0
+    imagePullPolicy: IfNotPresent
+    securityContext:
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "image_pull_not_always" in vio_ids
+
+    def test_image_pull_never(self, tmp_path):
+        """imagePullPolicy: Never should also trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "never.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: never-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1.0
+    imagePullPolicy: Never
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "image_pull_not_always" in vio_ids
+
+    def test_image_pull_no_policy_with_tag(self, tmp_path):
+        """No explicit imagePullPolicy with a tagged image triggers warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "nopolicy.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nopolicy-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1.0
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "image_pull_not_always" in vio_ids
+
+    def test_image_pull_always_not_flagged(self, tmp_path):
+        """imagePullPolicy: Always should not trigger the warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "always.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: always-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1.0
+    imagePullPolicy: Always
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "image_pull_not_always" not in vio_ids
+
+    def test_image_pull_latest_no_policy_not_flagged(self, tmp_path):
+        """:latest with no policy should NOT trigger image_pull_not_always.
+
+        K8s defaults to Always for :latest images, so the risk is different.
+        The image_tag_missing rule already covers this case.
+        """
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "latest-nopol.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: latest-nopol-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:latest
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        # image_tag_missing fires, but image_pull_not_always should NOT
+        assert "image_tag_missing" in vio_ids
+        assert "image_pull_not_always" not in vio_ids
+
+
 # ================================================================== #
 # Phase 2: RBAC scanning
 # ================================================================== #
@@ -1540,6 +1671,150 @@ roleRef:
         assert bindings[0]["status"] == "clean"
 
 
+class TestRBACImpersonate:
+    def test_rbac_impersonate(self, tmp_path):
+        """Role with impersonate verb should trigger alert."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "impersonate.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: impersonator
+rules:
+- apiGroups: [""]
+  resources: ["users", "groups"]
+  verbs: ["impersonate"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        rbac = [r for r in result["results"] if r["kind"] == "ClusterRole"]
+        assert len(rbac) == 1
+        vio_ids = [v["id"] for v in rbac[0]["violations"]]
+        assert "rbac_impersonate" in vio_ids
+
+    def test_rbac_no_impersonate_clean(self, tmp_path):
+        """Role without impersonate verb should not trigger the rule."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "no-impersonate.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reader
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        rbac = [r for r in result["results"] if r["kind"] == "Role"]
+        assert len(rbac) == 1
+        vio_ids = [v["id"] for v in rbac[0]["violations"]]
+        assert "rbac_impersonate" not in vio_ids
+
+
+class TestRBACConfigmapAccess:
+    def test_rbac_configmap_access(self, tmp_path):
+        """Role with get on configmaps should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "configmap-read.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: configmap-reader
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        rbac = [r for r in result["results"] if r["kind"] == "ClusterRole"]
+        assert len(rbac) == 1
+        vio_ids = [v["id"] for v in rbac[0]["violations"]]
+        assert "rbac_configmap_access" in vio_ids
+
+    def test_rbac_configmap_create_not_flagged(self, tmp_path):
+        """Role with only create on configmaps should not trigger the rule."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "configmap-create.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: configmap-creator
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["create"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        rbac = [r for r in result["results"] if r["kind"] == "Role"]
+        assert len(rbac) == 1
+        vio_ids = [v["id"] for v in rbac[0]["violations"]]
+        assert "rbac_configmap_access" not in vio_ids
+
+
+class TestRBACCreateClusterRoleBindings:
+    def test_rbac_create_clusterrolebindings(self, tmp_path):
+        """Role with create on clusterrolebindings should trigger alert."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "crb-create.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: escalator
+rules:
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterrolebindings"]
+  verbs: ["create"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        rbac = [r for r in result["results"] if r["kind"] == "ClusterRole"]
+        assert len(rbac) == 1
+        vio_ids = [v["id"] for v in rbac[0]["violations"]]
+        assert "rbac_create_clusterrolebindings" in vio_ids
+
+    def test_rbac_get_clusterrolebindings_not_flagged(self, tmp_path):
+        """Role with only get on clusterrolebindings should not trigger."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "crb-get.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crb-viewer
+rules:
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterrolebindings"]
+  verbs: ["get", "list"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        rbac = [r for r in result["results"] if r["kind"] == "ClusterRole"]
+        assert len(rbac) == 1
+        vio_ids = [v["id"] for v in rbac[0]["violations"]]
+        assert "rbac_create_clusterrolebindings" not in vio_ids
+
+
 # ================================================================== #
 # Phase 2: Infrastructure resources
 # ================================================================== #
@@ -1742,6 +2017,7 @@ spec:
   containers:
   - name: web
     image: nginx:1.25
+    imagePullPolicy: Always
     securityContext:
       runAsNonRoot: true
       runAsUser: 1000

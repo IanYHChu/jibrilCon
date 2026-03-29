@@ -412,6 +412,126 @@
       ]
     },
     {
+      "id": "apparmor_nesting_dangerous",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "Dangerous AppArmor nesting or raw profile directives detected",
+      "risk": "lxc.apparmor.allow_nesting, allow_incomplete, or raw directives weaken the AppArmor confinement, enabling nested containers to escape the outer AppArmor policy or inject arbitrary profile rules.",
+      "remediation": "Remove lxc.apparmor.allow_nesting, lxc.apparmor.allow_incomplete, and lxc.apparmor.raw directives. Use a properly scoped AppArmor profile instead.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apparmor_nesting_dangerous",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "seccomp_nesting_enabled",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Seccomp nesting is enabled, weakening privilege boundary",
+      "risk": "lxc.seccomp.allow_nesting permits nested containers to define their own seccomp profiles, potentially allowing syscalls blocked by the outer profile and widening the kernel attack surface.",
+      "remediation": "Remove 'lxc.seccomp.allow_nesting = 1' from the LXC configuration. Enforce seccomp profiles at the outermost container level.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "seccomp_nesting_enabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cgroup_devices_unrestricted",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Unrestricted cgroup device access (lxc.cgroup.devices.allow = a or broad patterns)",
+      "risk": "Allowing all devices or broad device patterns (e.g., 'a', 'c *:* rwm') gives the container raw access to host block and character devices, enabling disk read/write, GPU access, and container escape.",
+      "remediation": "Replace broad cgroup device allow rules with specific device entries. Only allow the exact devices the container workload requires.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cgroup_devices_unrestricted",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "memory_limit_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No memory limit configured (lxc.cgroup.memory.limit_in_bytes or lxc.cgroup2.memory.max)",
+      "risk": "Without a memory limit, a compromised or misbehaving container can consume all host memory, causing denial of service for other containers and host processes.",
+      "remediation": "Add 'lxc.cgroup.memory.limit_in_bytes = <bytes>' or 'lxc.cgroup2.memory.max = <bytes>' to the LXC configuration.",
+      "references": {
+        "mitre_attack": ["T1499.001"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "memory_limit_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "nproc_limit_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No process limit configured (lxc.prlimit.nproc)",
+      "risk": "Without a process limit, a compromised container can fork-bomb the host, exhausting PIDs and causing denial of service for all workloads.",
+      "remediation": "Add 'lxc.prlimit.nproc = <max_processes>' to the LXC configuration to limit the number of processes the container can create.",
+      "references": {
+        "mitre_attack": ["T1499.001"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "nproc_limit_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rootfs_not_readonly",
+      "type": "warning",
+      "severity": 5.5,
+      "description": "Container rootfs is not mounted read-only",
+      "risk": "A writable rootfs allows attackers to modify container binaries, install backdoors, or tamper with application files. Read-only rootfs forces explicit writable volume declarations.",
+      "remediation": "Add 'lxc.rootfs.options = ro' to the LXC configuration to mount the container rootfs as read-only.",
+      "references": {
+        "mitre_attack": ["T1565.001"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "rootfs_not_readonly",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
       "id": "systemd_service_missing",
       "type": "alert",
       "severity": 7.0,

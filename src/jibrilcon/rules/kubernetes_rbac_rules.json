@@ -209,6 +209,69 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "rbac_impersonate",
+      "type": "alert",
+      "severity": 8.5,
+      "description": "Role grants impersonate verb (can act as any user, group, or service account)",
+      "risk": "The impersonate verb allows assuming the identity of any user, group, or service account. An attacker with this permission can escalate to cluster-admin by impersonating a highly privileged account.",
+      "remediation": "Remove the impersonate verb. Use dedicated service accounts with specific RBAC permissions instead.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_impersonate",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_configmap_access",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Role grants read access to ConfigMaps (may contain credentials)",
+      "risk": "ConfigMaps often contain database connection strings, API keys, and other sensitive configuration. Broad read access enables credential harvesting across namespaces.",
+      "remediation": "Restrict configmaps access to specific namespaces and only the verbs required. Store secrets in Secret resources with proper RBAC.",
+      "references": {
+        "mitre_attack": ["T1552"],
+        "cis_kubernetes_benchmark": ["5.1.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_configmap_access",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "rbac_create_clusterrolebindings",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Role grants create permission on ClusterRoleBindings (privilege escalation path)",
+      "risk": "Creating ClusterRoleBindings allows binding any ClusterRole (including cluster-admin) to any subject. This is a direct privilege escalation path from a compromised service account to full cluster control.",
+      "remediation": "Remove create permission on clusterrolebindings. Use the escalate/bind restrictions to prevent privilege escalation.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["5.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_create_clusterrolebindings",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

@@ -103,6 +103,7 @@ _FIELD_TO_MANIFEST_KEY = {
     "proc_mount_unmasked": "securityContext.procMount",
     "subpath_with_hostpath": "volumeMounts[].subPath + hostPath",
     "share_process_namespace": "spec.shareProcessNamespace",
+    "image_pull_not_always": "spec.containers[].imagePullPolicy",
 }
 
 # Pod spec path per resource kind
@@ -413,6 +414,15 @@ def _extract_container_fields(
     else:
         image_tag_missing = True
 
+    # --- imagePullPolicy ---
+    # IfNotPresent allows running stale/compromised cached images
+    pull_policy = container.get("imagePullPolicy", "")
+    # If not set, K8s defaults to IfNotPresent for tagged images (not :latest)
+    # Flag IfNotPresent and Never as risks
+    image_pull_not_always = pull_policy in ("IfNotPresent", "Never") or (
+        not pull_policy and not image_tag_missing  # has a tag but no explicit policy
+    )
+
     # --- AppArmor unconfined ---
     # 1.30+ field: securityContext.appArmorProfile.type
     aa_profile = sc.get("appArmorProfile") or {}
@@ -465,6 +475,7 @@ def _extract_container_fields(
         "proc_mount_unmasked": proc_mount_unmasked,
         "subpath_with_hostpath": subpath_with_hostpath,
         "share_process_namespace": share_process_namespace,
+        "image_pull_not_always": image_pull_not_always,
     }
 
 
@@ -509,6 +520,9 @@ def _extract_rbac_role_fields(doc: dict[str, Any]) -> dict[str, Any]:
     has_create_pods = False
     has_nodes_proxy = False
     has_sa_token_create = False
+    has_impersonate = False
+    has_configmap_access = False
+    has_create_clusterrolebindings = False
 
     for rule in rules_list:
         if not isinstance(rule, dict):
@@ -561,6 +575,25 @@ def _extract_rbac_role_fields(doc: dict[str, Any]) -> dict[str, Any]:
         ):
             has_sa_token_create = True
 
+        # impersonate verb (act as any user/group/SA)
+        if "impersonate" in verbs:
+            has_impersonate = True
+
+        # configmaps access (often contain credentials)
+        if ("configmaps" in resources or "*" in resources) and verbs & {
+            "get",
+            "list",
+            "watch",
+            "*",
+        }:
+            has_configmap_access = True
+
+        # clusterrolebindings create (privilege escalation)
+        if ("clusterrolebindings" in resources or "*" in resources) and (
+            "create" in verbs or "*" in verbs
+        ):
+            has_create_clusterrolebindings = True
+
     return {
         "has_wildcard_verbs": has_wildcard_verbs,
         "has_wildcard_resources": has_wildcard_resources,
@@ -570,6 +603,9 @@ def _extract_rbac_role_fields(doc: dict[str, Any]) -> dict[str, Any]:
         "has_create_pods": has_create_pods,
         "has_nodes_proxy": has_nodes_proxy,
         "has_sa_token_create": has_sa_token_create,
+        "has_impersonate": has_impersonate,
+        "has_configmap_access": has_configmap_access,
+        "has_create_clusterrolebindings": has_create_clusterrolebindings,
         "binds_default_sa": False,
         "binds_anonymous": False,
     }
@@ -609,6 +645,9 @@ def _extract_rbac_binding_fields(doc: dict[str, Any]) -> dict[str, Any]:
         "has_create_pods": False,
         "has_nodes_proxy": False,
         "has_sa_token_create": False,  # nosec B105
+        "has_impersonate": False,
+        "has_configmap_access": False,
+        "has_create_clusterrolebindings": False,
         "binds_default_sa": binds_default_sa,
         "binds_anonymous": binds_anonymous,
     }
@@ -624,6 +663,11 @@ _RBAC_FIELD_TO_KEY = {
     "has_create_pods": "rules[].verbs (create) + resources (pods)",
     "has_nodes_proxy": "rules[].resources (nodes/proxy)",
     "has_sa_token_create": "rules[].resources (serviceaccounts/token)",  # nosec B105
+    "has_impersonate": "rules[].verbs (impersonate)",
+    "has_configmap_access": "rules[].resources (configmaps)",
+    "has_create_clusterrolebindings": (
+        "rules[].resources (clusterrolebindings) + verbs (create)"
+    ),
     "binds_default_sa": "subjects[].name (default)",
     "binds_anonymous": "subjects[].name (system:anonymous/unauthenticated)",
 }

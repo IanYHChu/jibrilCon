@@ -501,6 +501,34 @@
       ]
     },
     {
+      "id": "dangerous_device_cgroup",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Device cgroup rules grant unrestricted device access",
+      "risk": "Broad device cgroup rules (e.g., 'a *:* rwm') allow the container to access all host character and block devices, including /dev/mem and raw disk. This enables direct host memory reading and container escape.",
+      "remediation": "Remove broad device cgroup rules. Grant access only to specific devices required by the workload.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "dangerous_device_cgroup", "operator": "equals", "value": true}],
+      "severity_overrides": [
+        {"condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"}, "severity": 4.0, "type": "warning"}
+      ]
+    },
+    {
+      "id": "dangerous_device_mounted",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Container has direct access to dangerous host devices (/dev/mem, /dev/kmem, /dev/fuse, etc.)",
+      "risk": "Direct access to /dev/mem enables reading host kernel memory; /dev/fuse allows arbitrary filesystem mounting; /dev/sda grants raw disk access. These are direct container escape vectors.",
+      "remediation": "Remove dangerous device mappings from the container configuration. Use specific, non-privileged devices only.",
+      "references": {"mitre_attack": ["T1611"], "cis_docker_benchmark": ["5.4"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "dangerous_device_mounted", "operator": "equals", "value": true}],
+      "severity_overrides": [
+        {"condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"}, "severity": 5.0, "type": "warning"}
+      ]
+    },
+    {
       "id": "systemd_service_missing",
       "type": "alert",
       "severity": 7.0,

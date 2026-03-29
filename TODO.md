@@ -12,11 +12,11 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - [x] Detect missing/unconfined `lxc.selinux.context` (AppArmor is checked, SELinux is not)
 
 ### HIGH
-- [ ] Detect `lxc.apparmor.allow_nesting` / `allow_incomplete` / `raw` -- nested escape surface
-- [ ] Detect `lxc.seccomp.allow_nesting` -- privilege boundary weakened
-- [ ] Detect `lxc.cgroup.devices.allow = a` or broad patterns (`c 1:*`) -- raw device access
-- [ ] Detect missing resource limits: `lxc.cgroup.memory.limit_in_bytes`, `lxc.prlimit.nproc`, CPU limits
-- [ ] Detect missing `lxc.rootfs.options = ro` (read-only rootfs)
+- [x] Detect `lxc.apparmor.allow_nesting` / `allow_incomplete` / `raw` -- nested escape surface
+- [x] Detect `lxc.seccomp.allow_nesting` -- privilege boundary weakened
+- [x] Detect `lxc.cgroup.devices.allow = a` or broad patterns (`c 1:*`) -- raw device access
+- [x] Detect missing resource limits: `lxc.cgroup.memory.limit_in_bytes`, `lxc.prlimit.nproc`
+- [x] Detect missing `lxc.rootfs.options = ro` (read-only rootfs)
 
 ### MEDIUM
 - [ ] Enhance mount entry parsing to check OPTIONS (rbind, loop, remount), not just source paths
@@ -36,8 +36,8 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - [x] Detect missing resource limits: `Memory`, `PidsLimit` (NanoCpus, CpuQuota, MemorySwap remaining)
 - [x] Detect `RestartPolicy.Name = always` (persistence vector for compromised containers)
 - [x] Detect `LogConfig.Type = none` (audit trail disabled)
-- [ ] Detect dangerous `DeviceCgroupRules` (e.g., `a *:* rwm` grants all device access)
-- [ ] Detect dangerous `Devices[]` array entries (`/dev/mem`, `/dev/kmem`, `/dev/fuse`, `/dev/net/tun`)
+- [x] Detect dangerous `DeviceCgroupRules` (e.g., `a *:* rwm` grants all device access)
+- [x] Detect dangerous `Devices[]` array entries (`/dev/mem`, `/dev/kmem`, `/dev/fuse`, `/dev/net/tun`)
 
 ### MEDIUM
 - [ ] Detect Docker socket mount writable (check `ro` option on `/var/run/docker.sock` bind)
@@ -50,8 +50,8 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 ### HIGH
 - [x] Check all 5 OCI capability sets: ambient, inheritable, permitted (now all 5 checked)
 - [x] Validate `linux.maskedPaths` includes critical paths (`/proc/kcore`, `/proc/sysrq-trigger`, `/proc/mem`)
-- [ ] Validate `linux.readonlyPaths` includes `/proc/sys`, `/proc/irq`, `/sys/firmware`
-- [ ] Detect SELinux label issues: `process.selinuxLabel` with `spc_t` or missing on RHEL-based systems
+- [x] Validate `linux.readonlyPaths` includes `/proc/sys`, `/proc/irq`, `/sys/firmware`
+- [x] Detect SELinux label issues: `process.selinuxLabel` with `spc_t`
 - [x] Detect missing resource limits: `linux.resources.memory.limit`, `linux.resources.pids.limit` (cpu remaining)
 
 ### MEDIUM
@@ -69,10 +69,10 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - [x] Scan kube-controller-manager: `--service-account-private-key-file`, `--root-ca-file`, `--use-service-account-credentials`
 
 ### HIGH
-- [ ] Detect `imagePullPolicy: IfNotPresent` (supply chain risk)
+- [x] Detect `imagePullPolicy: IfNotPresent` (supply chain risk)
 - [ ] Validate `spec.securityContext.sysctls` against unsafe sysctl list
 - [ ] Scan ValidatingWebhookConfiguration / MutatingWebhookConfiguration for `failurePolicy: Ignore`
-- [ ] Expand RBAC detection: impersonate verbs, configmaps/get, clusterrolebindings/create, watch secrets
+- [x] Expand RBAC detection: impersonate verbs, configmaps/get, clusterrolebindings/create (watch secrets remaining)
 - [ ] Detect PodSecurityPolicy resources and admission controller status
 - [ ] Detect missing SELinux options in pod security context
 

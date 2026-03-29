@@ -1018,6 +1018,90 @@ class TestDockerScanner:
         assert "daemon_userns_remap_missing" in vio_ids
         assert "daemon_icc_enabled" in vio_ids
 
+    def test_dangerous_device_cgroup_detected(self, make_rootfs):
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "dcg" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/devcgroup",
+                "Config": {"User": "app", "Image": "app:v1"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "DeviceCgroupRules": ["a *:* rwm"],
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "devcgroup")
+        ctx.set_service_meta(
+            "docker",
+            "devcgroup",
+            {
+                "user": "u",
+                "unit": "d.service",
+                "path": "etc/systemd/system/d.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        assert "dangerous_device_cgroup" in [
+            v["id"] for v in result["results"][0]["violations"]
+        ]
+
+    def test_dangerous_device_mounted_detected(self, make_rootfs):
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "dvm" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/devmount",
+                "Config": {"User": "app", "Image": "app:v1"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "Devices": [
+                    {
+                        "PathOnHost": "/dev/mem",
+                        "PathInContainer": "/dev/mem",
+                        "CgroupPermissions": "rwm",
+                    }
+                ],
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "devmount")
+        ctx.set_service_meta(
+            "docker",
+            "devmount",
+            {
+                "user": "u",
+                "unit": "d.service",
+                "path": "etc/systemd/system/d.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        assert "dangerous_device_mounted" in [
+            v["id"] for v in result["results"][0]["violations"]
+        ]
+
 
 # ------------------------------------------------------------------ #
 # Podman scanner
@@ -1067,7 +1151,13 @@ class TestPodmanScanner:
                 "mounts": [],
                 "linux": {
                     "seccompProfilePath": "/path/to/seccomp.json",
-                    "readonlyPaths": ["/proc"],
+                    "readonlyPaths": [
+                        "/proc",
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
                     "namespaces": [
                         {"type": "pid"},
                         {"type": "network"},
@@ -1991,6 +2081,114 @@ class TestPodmanScanner:
         vio_ids = [v["id"] for v in ghost[0]["violations"]]
         assert "systemd_service_broken" in vio_ids
 
+    def test_critical_readonly_missing_detected(self, make_rootfs):
+        r = make_rootfs
+        cid = "rop" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "noreadonly",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "noreadonly")
+        ctx.set_service_meta(
+            "podman",
+            "noreadonly",
+            {
+                "user": "u",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        assert "critical_readonly_missing" in [
+            v["id"] for v in result["results"][0]["violations"]
+        ]
+
+    def test_selinux_privileged_detected(self, make_rootfs):
+        r = make_rootfs
+        cid = "sel" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "selinux_priv",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                    "selinuxLabel": "system_u:system_r:spc_t:s0",
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "selinux_priv")
+        ctx.set_service_meta(
+            "podman",
+            "selinux_priv",
+            {
+                "user": "u",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        assert "selinux_privileged" in [
+            v["id"] for v in result["results"][0]["violations"]
+        ]
+
 
 # ------------------------------------------------------------------ #
 # LXC scanner
@@ -2006,6 +2204,9 @@ class TestLxcScanner:
         "lxc.net.0.type = veth\n"
         "lxc.no_new_privs = 1\n"
         "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+        "lxc.cgroup.memory.limit_in_bytes = 536870912\n"
+        "lxc.prlimit.nproc = 1024\n"
+        "lxc.rootfs.options = ro\n"
     )
 
     _MISSING_IDMAP_CONFIG = (
@@ -2680,6 +2881,364 @@ class TestLxcScanner:
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "selinux_unconfined" not in vio_ids
+
+    def test_apparmor_nesting_dangerous(self, make_rootfs):
+        """lxc.apparmor.allow_nesting = 1 should trigger alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/aanest/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.apparmor.allow_nesting = 1\n"
+        )
+        r.add_lxc_config("aanest", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "aanest",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-aanest.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "aanest")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "apparmor_nesting_dangerous" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "apparmor_nesting_dangerous"
+        ][0]
+        assert vio["type"] == "alert"
+        assert vio["severity"] == 7.5
+
+    def test_apparmor_raw_dangerous(self, make_rootfs):
+        """lxc.apparmor.raw should trigger apparmor_nesting_dangerous."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/aaraw/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.apparmor.raw = allow mount,\n"
+        )
+        r.add_lxc_config("aaraw", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "aaraw",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-aaraw.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "aaraw")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "apparmor_nesting_dangerous" in vio_ids
+
+    def test_seccomp_nesting_detected(self, make_rootfs):
+        """lxc.seccomp.allow_nesting = 1 should trigger alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/secnest/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.seccomp.allow_nesting = 1\n"
+        )
+        r.add_lxc_config("secnest", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "secnest",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-secnest.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "secnest")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "seccomp_nesting_enabled" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "seccomp_nesting_enabled"
+        ][0]
+        assert vio["type"] == "alert"
+        assert vio["severity"] == 7.0
+
+    def test_cgroup_devices_unrestricted(self, make_rootfs):
+        """lxc.cgroup.devices.allow = a should trigger alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/cgdev/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.cgroup.devices.allow = a\n"
+        )
+        r.add_lxc_config("cgdev", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "cgdev",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-cgdev.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "cgdev")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cgroup_devices_unrestricted" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "cgroup_devices_unrestricted"
+        ][0]
+        assert vio["type"] == "alert"
+        assert vio["severity"] == 8.0
+
+    def test_cgroup_devices_broad_pattern(self, make_rootfs):
+        """Broad cgroup device pattern 'c *:* rwm' should trigger alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/cgbroad/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.cgroup.devices.allow = c *:* rwm\n"
+        )
+        r.add_lxc_config("cgbroad", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "cgbroad",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-cgbroad.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "cgbroad")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cgroup_devices_unrestricted" in vio_ids
+
+    def test_memory_limit_missing(self, make_rootfs):
+        """Missing memory limit should trigger warning."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nomem/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("nomem", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nomem",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nomem.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "nomem")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "memory_limit_missing" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "memory_limit_missing"
+        ][0]
+        assert vio["type"] == "warning"
+        assert vio["severity"] == 5.0
+
+    def test_memory_limit_set_not_flagged(self, make_rootfs):
+        """Container with memory limit should NOT trigger."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/memok/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.cgroup.memory.limit_in_bytes = 536870912\n"
+        )
+        r.add_lxc_config("memok", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "memok",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-memok.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "memok")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "memory_limit_missing" not in vio_ids
+
+    def test_nproc_limit_missing(self, make_rootfs):
+        """Missing nproc limit should trigger warning."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nonproc/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("nonproc", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nonproc",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nonproc.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "nonproc")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "nproc_limit_missing" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "nproc_limit_missing"
+        ][0]
+        assert vio["type"] == "warning"
+        assert vio["severity"] == 5.0
+
+    def test_nproc_limit_set_not_flagged(self, make_rootfs):
+        """Container with nproc limit should NOT trigger."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nprocok/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.prlimit.nproc = 1024\n"
+        )
+        r.add_lxc_config("nprocok", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nprocok",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nprocok.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "nprocok")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "nproc_limit_missing" not in vio_ids
+
+    def test_rootfs_not_readonly(self, make_rootfs):
+        """Missing lxc.rootfs.options = ro should trigger warning."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/rwroot/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("rwroot", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "rwroot",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-rwroot.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "rwroot")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "rootfs_not_readonly" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "rootfs_not_readonly"
+        ][0]
+        assert vio["type"] == "warning"
+        assert vio["severity"] == 5.5
+
+    def test_rootfs_readonly_not_flagged(self, make_rootfs):
+        """lxc.rootfs.options = ro should NOT trigger."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/roroot/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.rootfs.options = ro\n"
+        )
+        r.add_lxc_config("roroot", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "roroot",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-roroot.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "roroot")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "rootfs_not_readonly" not in vio_ids
 
     def test_broken_systemd_service_detected(self, make_rootfs):
         """Systemd references LXC container but config not on disk."""

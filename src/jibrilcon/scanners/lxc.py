@@ -89,6 +89,12 @@ _FIELD_TO_CONFIG_KEY = {
     "namespace_keep_enabled": "lxc.namespace.keep",
     "mount_auto_dangerous": "lxc.mount.auto",
     "selinux_unconfined": "lxc.selinux.context",
+    "apparmor_nesting_dangerous": "lxc.apparmor.allow_nesting/allow_incomplete/raw",
+    "seccomp_nesting_enabled": "lxc.seccomp.allow_nesting",
+    "cgroup_devices_unrestricted": "lxc.cgroup.devices.allow",
+    "memory_limit_missing": "lxc.cgroup.memory.limit_in_bytes",
+    "nproc_limit_missing": "lxc.prlimit.nproc",
+    "rootfs_not_readonly": "lxc.rootfs.options",
     "systemd_service_found": "systemd.service",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
 }
@@ -423,6 +429,67 @@ def _extract_selinux_context(entries: dict[str, list[str]]) -> dict[str, bool]:
     return {"selinux_unconfined": selinux_unconfined}
 
 
+def _extract_apparmor_nesting(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Detect dangerous AppArmor nesting/incomplete/raw directives."""
+    allow_nesting = any(
+        v.strip() == "1"
+        for v in entries.get("lxc.apparmor.allow_nesting", [])
+        if isinstance(v, str)
+    )
+    allow_incomplete = any(
+        v.strip() == "1"
+        for v in entries.get("lxc.apparmor.allow_incomplete", [])
+        if isinstance(v, str)
+    )
+    has_raw = bool(entries.get("lxc.apparmor.raw"))
+    return {"apparmor_nesting_dangerous": allow_nesting or allow_incomplete or has_raw}
+
+
+def _extract_seccomp_nesting(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Detect seccomp nesting which weakens privilege boundary."""
+    allow_nesting = any(
+        v.strip() == "1"
+        for v in entries.get("lxc.seccomp.allow_nesting", [])
+        if isinstance(v, str)
+    )
+    return {"seccomp_nesting_enabled": allow_nesting}
+
+
+def _extract_cgroup_devices(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Detect unrestricted device access via cgroup device allow rules."""
+    dangerous_patterns = {"a", "a *:* rwm", "c *:* rwm", "b *:* rwm", "c 1:* rwm"}
+    allows = entries.get("lxc.cgroup.devices.allow", []) + entries.get(
+        "lxc.cgroup2.devices.allow", []
+    )
+    has_dangerous = any(
+        isinstance(v, str) and v.strip() in dangerous_patterns for v in allows
+    )
+    return {"cgroup_devices_unrestricted": has_dangerous}
+
+
+def _extract_resource_limits(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check for missing resource limits."""
+    mem_vals = entries.get("lxc.cgroup.memory.limit_in_bytes", []) + entries.get(
+        "lxc.cgroup2.memory.max", []
+    )
+    memory_limit_missing = not any(isinstance(v, str) and v.strip() for v in mem_vals)
+
+    nproc_vals = entries.get("lxc.prlimit.nproc", [])
+    nproc_limit_missing = not any(isinstance(v, str) and v.strip() for v in nproc_vals)
+
+    return {
+        "memory_limit_missing": memory_limit_missing,
+        "nproc_limit_missing": nproc_limit_missing,
+    }
+
+
+def _extract_rootfs_readonly(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if rootfs is mounted read-only."""
+    vals = entries.get("lxc.rootfs.options", [])
+    is_ro = any(isinstance(v, str) and "ro" in v.split(",") for v in vals)
+    return {"rootfs_not_readonly": not is_ro}
+
+
 def _parse_mount_entry(entry: str) -> dict[str, str]:
     """
     Given a single ``lxc.mount.entry`` line, return mapping:
@@ -496,6 +563,11 @@ def _analyze_lxc_container(
     ns_keep_info = _extract_namespace_keep(entries)
     mount_auto_info = _extract_mount_auto(entries)
     selinux_info = _extract_selinux_context(entries)
+    aa_nesting_info = _extract_apparmor_nesting(entries)
+    seccomp_nesting_info = _extract_seccomp_nesting(entries)
+    cgroup_dev_info = _extract_cgroup_devices(entries)
+    resource_info = _extract_resource_limits(entries)
+    rootfs_ro_info = _extract_rootfs_readonly(entries)
 
     # infer runs_as_root from context or missing mappings
     systemd_root = context.is_systemd_started(
@@ -524,6 +596,11 @@ def _analyze_lxc_container(
         **ns_keep_info,
         **mount_auto_info,
         **selinux_info,
+        **aa_nesting_info,
+        **seccomp_nesting_info,
+        **cgroup_dev_info,
+        **resource_info,
+        **rootfs_ro_info,
         "runs_as_root": runs_as_root,
         "systemd_service_found": systemd_service_found,
         "systemd_caps_unrestricted": systemd_caps_unrestricted,

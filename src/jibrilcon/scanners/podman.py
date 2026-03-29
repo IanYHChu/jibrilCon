@@ -83,6 +83,8 @@ _CRITICAL_MASKED = frozenset(
     {"/proc/kcore", "/proc/sysrq-trigger", "/proc/mem", "/proc/kmsg"}
 )
 
+_CRITICAL_READONLY = frozenset({"/proc/sys", "/proc/irq", "/proc/bus", "/sys/firmware"})
+
 _DANGEROUS_BIND_PATHS = frozenset(
     {
         "/",
@@ -118,6 +120,8 @@ _FIELD_TO_CONFIG_KEY = {
     "pids_limit_missing": "linux.resources.pids.limit",
     "critical_masks_missing": "linux.maskedPaths",
     "runtime_mode": "runtime_mode",
+    "critical_readonly_missing": "linux.readonlyPaths",
+    "selinux_privileged": "process.selinuxLabel",
     "systemd_service_found": "systemd.service",
     "systemd_user": "systemd.User",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
@@ -307,6 +311,14 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     masked_paths = set(cfg.get("linux", {}).get("maskedPaths", []))
     critical_masks_missing = bool(_CRITICAL_MASKED - masked_paths)
 
+    # Critical readonly paths that should be present
+    readonly_paths = set(cfg.get("linux", {}).get("readonlyPaths", []))
+    critical_readonly_missing = bool(_CRITICAL_READONLY - readonly_paths)
+
+    # SELinux label -- spc_t (super privileged container) is effectively unconfined
+    selinux_label = cfg.get("process", {}).get("selinuxLabel", "")
+    selinux_privileged = isinstance(selinux_label, str) and "spc_t" in selinux_label
+
     return {
         "process.user.uid": uid,
         "has_cap_sys_admin": has_cap_sys_admin,
@@ -324,6 +336,8 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
         "memory_limit_missing": memory_limit_missing,
         "pids_limit_missing": pids_limit_missing,
         "critical_masks_missing": critical_masks_missing,
+        "critical_readonly_missing": critical_readonly_missing,
+        "selinux_privileged": selinux_privileged,
     }
 
 

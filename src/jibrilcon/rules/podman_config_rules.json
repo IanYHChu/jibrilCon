@@ -406,6 +406,28 @@
       ]
     },
     {
+      "id": "critical_readonly_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Critical kernel interfaces not in readonlyPaths (/proc/sys, /proc/irq, /sys/firmware)",
+      "risk": "Without read-only protection on /proc/sys, a container can modify kernel parameters (sysctl). /proc/irq manipulation can disrupt hardware interrupts. /sys/firmware access may leak UEFI variables.",
+      "remediation": "Ensure linux.readonlyPaths includes /proc/sys, /proc/irq, /proc/bus, and /sys/firmware.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "critical_readonly_missing", "operator": "equals", "value": true}]
+    },
+    {
+      "id": "selinux_privileged",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "SELinux label uses super-privileged container type (spc_t)",
+      "risk": "The spc_t SELinux type grants the container unrestricted access equivalent to an unconfined process. All SELinux mandatory access control is bypassed.",
+      "remediation": "Use a confined SELinux type (e.g., container_t) instead of spc_t.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "selinux_privileged", "operator": "equals", "value": true}]
+    },
+    {
       "id": "systemd_service_missing",
       "type": "alert",
       "severity": 7.0,

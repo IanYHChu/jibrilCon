@@ -461,6 +461,27 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "image_pull_not_always",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Container imagePullPolicy is not set to Always",
+      "risk": "Without Always pull policy, Kubernetes uses cached images which may be stale or compromised. An attacker who poisons the node image cache can execute arbitrary code when the pod restarts.",
+      "remediation": "Set imagePullPolicy to Always, or use image digests (sha256) to ensure integrity.",
+      "references": {
+        "mitre_attack": ["T1525", "T1195.002"],
+        "cis_kubernetes_benchmark": ["5.5.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "image_pull_not_always",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

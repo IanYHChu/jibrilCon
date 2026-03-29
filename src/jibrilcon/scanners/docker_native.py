@@ -102,6 +102,8 @@ _FIELD_TO_CONFIG_KEY = {
     "logging_disabled": "HostConfig.LogConfig",
     "daemon_userns_remap_missing": "/etc/docker/daemon.json userns-remap",
     "daemon_icc_enabled": "/etc/docker/daemon.json icc",
+    "dangerous_device_cgroup": "HostConfig.DeviceCgroupRules",
+    "dangerous_device_mounted": "HostConfig.Devices",
     "systemd_service_found": "systemd.service",
     "systemd_user": "systemd.User",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
@@ -327,6 +329,28 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     log_config = host.get("LogConfig") or {}
     logging_disabled = log_config.get("Type") == "none"
 
+    # Dangerous device cgroup rules (e.g., "a *:* rwm" = all devices)
+    device_cgroup_rules = host.get("DeviceCgroupRules") or []
+    if not isinstance(device_cgroup_rules, list):
+        device_cgroup_rules = []
+    _DANGEROUS_DEVICE_RULES = {"a *:* rwm", "a *:* rw", "a *:* rm", "a *:* wm"}
+    dangerous_device_cgroup = any(
+        isinstance(r, str) and r.strip() in _DANGEROUS_DEVICE_RULES
+        for r in device_cgroup_rules
+    )
+
+    # Dangerous individual device mappings
+    _DANGEROUS_DEVICES = frozenset(
+        {"/dev/mem", "/dev/kmem", "/dev/fuse", "/dev/net/tun", "/dev/sda", "/dev/port"}
+    )
+    devices = host.get("Devices") or []
+    if not isinstance(devices, list):
+        devices = []
+    dangerous_device_mounted = any(
+        isinstance(d, dict) and d.get("PathOnHost", "") in _DANGEROUS_DEVICES
+        for d in devices
+    )
+
     return {
         "privileged": privileged,
         "readonly_rootfs": readonly_rootfs,
@@ -347,6 +371,8 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         "pids_limit_missing": pids_limit_missing,
         "restart_always": restart_always,
         "logging_disabled": logging_disabled,
+        "dangerous_device_cgroup": dangerous_device_cgroup,
+        "dangerous_device_mounted": dangerous_device_mounted,
     }
 
 
