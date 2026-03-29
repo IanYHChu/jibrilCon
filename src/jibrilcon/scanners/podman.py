@@ -8,6 +8,17 @@ podman.py
 Statically analyse Podman container configuration files located in a
 mounted root filesystem image.
 
+Discovery model
+---------------
+Phase 1 (systemd-driven): Process containers that ScanContext knows about
+from systemd services FIRST.  These are "managed" containers.
+
+Phase 2 (file-path sweep): Discover all containers from file paths, skip
+those already handled in Phase 1, mark remainder as orphaned (managed=False).
+
+Broken service detection: If systemd says a container should exist but its
+config is NOT on disk, emit a ``systemd_service_broken`` violation.
+
 Focus areas
 -----------
 * Containers running as UID 0
@@ -277,6 +288,136 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _analyze_container(
+    name: str,
+    cfg_path: str,
+    runtime_mode: str,
+    context: ScanContext,
+    rules: list[dict[str, Any]],
+    mount_path: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Load config, apply overrides, evaluate rules. Return (data, vios).
+
+    Shared analysis logic used by both Phase 1 (managed) and Phase 2
+    (orphaned) to avoid code duplication.
+    """
+    # 1) load default config
+    try:
+        cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
+    except RuntimeError as exc:
+        logger.warning("Skipping container %s: %s", name, exc)
+        return {}, []
+
+    # 2) acquire Exec* command lines
+    exec_lines: list[str] = context.get_exec_lines("podman", name)
+    for line in exec_lines:
+        # --config <dir>
+        m_cfg = _CONFIG_RE.search(line)
+        if m_cfg:
+            conf_dir = m_cfg.group("confdir")
+            try:
+                conf_json_path = safe_join(
+                    mount_path,
+                    conf_dir.lstrip("/"),
+                    "config.json",
+                )
+            except ValueError as exc:
+                logger.warning("Skipping Podman config override: %s", exc)
+                conf_json_path = None
+            if conf_json_path and os.path.exists(conf_json_path):
+                override_cfg = load_json_or_empty(conf_json_path)
+                if override_cfg:
+                    deep_merge(cfg_json, override_cfg)
+
+        # --module <file>
+        m_mod = _MODULE_RE.search(line)
+        if m_mod:
+            mod_arg = m_mod.group("modfile")
+            try:
+                if "/" in mod_arg:
+                    mod_path = safe_join(mount_path, mod_arg.lstrip("/"))
+                else:
+                    mod_path = safe_join(
+                        mount_path,
+                        "etc/podman/modules",
+                        f"{mod_arg}.toml",
+                    )
+            except ValueError as exc:
+                logger.warning("Skipping Podman module override: %s", exc)
+                mod_path = None
+            if mod_path and os.path.exists(mod_path):
+                try:
+                    with open(mod_path, "rb") as fp:
+                        mod_data = toml.load(fp)
+                    if isinstance(mod_data, dict):
+                        deep_merge(cfg_json, mod_data)
+                    else:
+                        logger.warning(
+                            "TOML module %s is not a dict (got %s), skipping",
+                            mod_path,
+                            type(mod_data).__name__,
+                        )
+                except (OSError, ValueError, KeyError) as exc:
+                    logger.warning("Skipping malformed module %s: %s", mod_path, exc)
+
+    data = _extract_fields(cfg_json)
+    data["runtime_mode"] = runtime_mode
+
+    # merge systemd inference: flag if service lacks non-root User=
+    data["service_user_missing"] = context.is_user_missing(name)
+
+    # Systemd service cross-validation (automotive: all containers
+    # MUST have a corresponding systemd service)
+    svc_meta = context.get_service_meta("podman", name)
+    data["systemd_service_found"] = bool(svc_meta)
+    data["systemd_user"] = svc_meta.get("user", "")
+    data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
+        "cap_bounding_set"
+    )
+
+    vios_raw = evaluate_rules(data, rules)
+
+    def _resolve_lines(_v: dict[str, Any], used_fields: set[str]) -> list[str]:
+        lines = []
+        for f in used_fields:
+            cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
+            val: Any = cfg_json
+            for part in cfg_key.split("."):
+                val = val.get(part, {}) if isinstance(val, dict) else {}
+            if val:
+                lines.append(f"{cfg_key} = {val}")
+            else:
+                lines.append(f"<missing> {cfg_key}")
+        return lines
+
+    vios = process_violations(vios_raw, cfg_path, mount_path, _resolve_lines)
+    return data, vios
+
+
+def _make_broken_service_violation(name: str, service_path: str) -> dict[str, Any]:
+    """Create a violation for a systemd service whose container is missing on disk."""
+    return {
+        "id": "systemd_service_broken",
+        "type": "alert",
+        "severity": 8.0,
+        "description": (
+            "Systemd service references a Podman container whose "
+            "configuration was not found on disk"
+        ),
+        "risk": (
+            "The systemd service will fail to start this container at boot. "
+            "This may indicate a deleted container, misconfigured storage "
+            "path, or filesystem corruption."
+        ),
+        "remediation": (
+            "Verify the container exists and the Podman storage path is "
+            "correct, or remove the obsolete systemd service."
+        ),
+        "source": f"/{service_path}",
+        "lines": [f"Container '{name}' not found in any Podman storage root"],
+    }
+
+
 # ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
@@ -285,6 +426,15 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
 def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     """
     Scan Podman container configurations under *mount_path*.
+
+    Uses a two-phase systemd-driven discovery model:
+
+    **Phase 1** -- iterate containers known to systemd (managed).
+    If a container's config is not found on disk, emit a
+    ``systemd_service_broken`` violation.
+
+    **Phase 2** -- sweep file paths for remaining containers not
+    already processed in Phase 1 (orphaned, managed=False).
 
     Raises
     ------
@@ -307,99 +457,43 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
-    for name, cfg_path, runtime_mode in _discover_configs(mount_path):
-        # 1) load default config
-        try:
-            cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
-        except RuntimeError as exc:
-            logger.warning("Skipping container %s: %s", name, exc)
+    # Build lookup of all containers found on disk
+    disk_configs = _discover_configs(mount_path)
+    disk_lookup: dict[str, tuple[str, str]] = {}
+    for name, cfg_path, runtime_mode in disk_configs:
+        disk_lookup[name] = (cfg_path, runtime_mode)
+
+    # Track which on-disk containers are consumed by Phase 1
+    phase1_names: set[str] = set()
+
+    # -----------------------------------------------------------------
+    # Phase 1: systemd-driven (managed containers)
+    # -----------------------------------------------------------------
+    systemd_names = context.get_started_containers("podman")
+    for name in sorted(systemd_names):
+        phase1_names.add(name)
+
+        if name not in disk_lookup:
+            # Broken service: systemd references container but config not on disk
+            svc_meta = context.get_service_meta("podman", name)
+            service_path = svc_meta.get("path", "unknown")
+            vios = [_make_broken_service_violation(name, service_path)]
+            alert_count += 1
+            containers[name] = {
+                "container": name,
+                "violations": vios,
+                "status": "violated",
+                "managed": True,
+            }
             continue
 
-        # 2) acquire Exec* command lines  -----------------
-        exec_lines: list[str] = context.get_exec_lines("podman", name)
-        for line in exec_lines:
-            # --config <dir>
-            m_cfg = _CONFIG_RE.search(line)
-            if m_cfg:
-                conf_dir = m_cfg.group("confdir")
-                try:
-                    conf_json_path = safe_join(
-                        mount_path,
-                        conf_dir.lstrip("/"),
-                        "config.json",
-                    )
-                except ValueError as exc:
-                    logger.warning("Skipping Podman config override: %s", exc)
-                    conf_json_path = None
-                if conf_json_path and os.path.exists(conf_json_path):
-                    override_cfg = load_json_or_empty(conf_json_path)
-                    if override_cfg:
-                        deep_merge(cfg_json, override_cfg)
-
-            # --module <file>
-            m_mod = _MODULE_RE.search(line)
-            if m_mod:
-                mod_arg = m_mod.group("modfile")
-                try:
-                    if "/" in mod_arg:
-                        mod_path = safe_join(mount_path, mod_arg.lstrip("/"))
-                    else:
-                        mod_path = safe_join(
-                            mount_path,
-                            "etc/podman/modules",
-                            f"{mod_arg}.toml",
-                        )
-                except ValueError as exc:
-                    logger.warning("Skipping Podman module override: %s", exc)
-                    mod_path = None
-                if mod_path and os.path.exists(mod_path):
-                    try:
-                        with open(mod_path, "rb") as fp:
-                            mod_data = toml.load(fp)
-                        if isinstance(mod_data, dict):
-                            deep_merge(cfg_json, mod_data)
-                        else:
-                            logger.warning(
-                                "TOML module %s is not a dict (got %s), skipping",
-                                mod_path,
-                                type(mod_data).__name__,
-                            )
-                    except (OSError, ValueError, KeyError) as exc:
-                        logger.warning(
-                            "Skipping malformed module %s: %s", mod_path, exc
-                        )
-
-        data = _extract_fields(cfg_json)
-        data["runtime_mode"] = runtime_mode
-
-        # merge systemd inference: flag if service lacks non-root User=
-        data["service_user_missing"] = context.is_user_missing(name)
-
-        # Systemd service cross-validation (automotive: all containers
-        # MUST have a corresponding systemd service)
-        svc_meta = context.get_service_meta("podman", name)
-        data["systemd_service_found"] = bool(svc_meta)
-        data["systemd_user"] = svc_meta.get("user", "")
-        data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
-            "cap_bounding_set"
+        cfg_path, runtime_mode = disk_lookup[name]
+        data, vios = _analyze_container(
+            name, cfg_path, runtime_mode, context, rules, mount_path
         )
-
-        vios_raw = evaluate_rules(data, rules)
-
-        def _resolve_lines(_v, used_fields):
-            lines = []
-            for f in used_fields:
-                cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
-                val = cfg_json
-                for part in cfg_key.split("."):
-                    val = val.get(part, {}) if isinstance(val, dict) else {}
-                if val:
-                    lines.append(f"{cfg_key} = {val}")
-                else:
-                    lines.append(f"<missing> {cfg_key}")
-            return lines
-
-        vios = process_violations(vios_raw, cfg_path, mount_path, _resolve_lines)
+        if not data and not vios:
+            # _analyze_container returned empty due to read error
+            continue
 
         status = "violated" if vios else "clean"
         if any(v["type"] == "alert" for v in vios):
@@ -411,6 +505,33 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             "container": name,
             "violations": vios,
             "status": status,
+            "managed": True,
+        }
+
+    # -----------------------------------------------------------------
+    # Phase 2: file-path sweep (orphaned containers)
+    # -----------------------------------------------------------------
+    for name, cfg_path, runtime_mode in disk_configs:
+        if name in phase1_names:
+            continue  # already handled in Phase 1
+
+        data, vios = _analyze_container(
+            name, cfg_path, runtime_mode, context, rules, mount_path
+        )
+        if not data and not vios:
+            continue
+
+        status = "violated" if vios else "clean"
+        if any(v["type"] == "alert" for v in vios):
+            alert_count += 1
+        elif any(v["type"] == "warning" for v in vios):
+            warn_count += 1
+
+        containers[name] = {
+            "container": name,
+            "violations": vios,
+            "status": status,
+            "managed": False,
         }
 
     summary = {

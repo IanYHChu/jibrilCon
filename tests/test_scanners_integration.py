@@ -27,6 +27,7 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("docker", "clean")
         ctx.set_service_meta(
             "docker",
             "clean",
@@ -45,6 +46,7 @@ class TestDockerScanner:
         assert len(containers) == 1
         assert containers[0]["status"] == "clean"
         assert containers[0]["violations"] == []
+        assert containers[0]["managed"] is True
 
     def test_privileged_container(self, make_rootfs):
         r = make_rootfs
@@ -214,6 +216,7 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("docker", "roextra")
         ctx.set_service_meta(
             "docker",
             "roextra",
@@ -506,6 +509,7 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("docker", "hardened")
         ctx.set_service_meta(
             "docker",
             "hardened",
@@ -522,6 +526,7 @@ class TestDockerScanner:
         assert len(containers) == 1
         assert containers[0]["status"] == "clean"
         assert containers[0]["violations"] == []
+        assert containers[0]["managed"] is True
 
     def test_dangerous_bind_path_docker_sock(self, make_rootfs):
         r = make_rootfs
@@ -641,6 +646,7 @@ class TestDockerScanner:
         assert len(priv_vio) == 1
         assert priv_vio[0]["severity"] == 5.0
         assert priv_vio[0]["type"] == "warning"
+        assert containers[0]["managed"] is False
 
     def test_rootful_privileged_keeps_full_severity(self, make_rootfs):
         """Rootful Docker privileged container keeps original high severity."""
@@ -659,6 +665,7 @@ class TestDockerScanner:
         assert len(priv_vio) == 1
         assert priv_vio[0]["severity"] == 9.0
         assert priv_vio[0]["type"] == "alert"
+        assert containers[0]["managed"] is False
 
     def test_systemd_service_missing_detected(self, make_rootfs):
         """Container without systemd service should trigger alert."""
@@ -674,6 +681,7 @@ class TestDockerScanner:
         result = docker_native.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "systemd_service_missing" in vio_ids
+        assert result["results"][0]["managed"] is False
 
     def test_systemd_caps_unrestricted_detected(self, make_rootfs):
         """Systemd service without CapabilityBoundingSet should trigger warning."""
@@ -691,6 +699,7 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("docker", "nocaps")
         # Register service meta WITHOUT cap_bounding_set
         ctx.set_service_meta(
             "docker",
@@ -725,6 +734,7 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("docker", "withcaps")
         ctx.set_service_meta(
             "docker",
             "withcaps",
@@ -740,6 +750,73 @@ class TestDockerScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "systemd_caps_unrestricted" not in vio_ids
         assert "systemd_service_missing" not in vio_ids
+
+    def test_broken_systemd_service_detected(self, make_rootfs):
+        """Systemd references container but config not on disk."""
+        r = make_rootfs
+        ctx = _make_context()
+        # Register a systemd service for a container that doesn't exist on disk
+        ctx.mark_systemd_started("docker", "ghost")
+        ctx.set_service_meta(
+            "docker",
+            "ghost",
+            {
+                "user": "dockeruser",
+                "unit": "docker-ghost.service",
+                "path": "etc/systemd/system/docker-ghost.service",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        # Should find the ghost container as a broken service
+        ghost = [c for c in result["results"] if c["container"] == "ghost"]
+        assert len(ghost) == 1
+        assert ghost[0]["managed"] is True
+        assert ghost[0]["status"] == "violated"
+        vio_ids = [v["id"] for v in ghost[0]["violations"]]
+        assert "systemd_service_broken" in vio_ids
+        # Verify the source references the systemd service path
+        broken_vio = [
+            v for v in ghost[0]["violations"] if v["id"] == "systemd_service_broken"
+        ][0]
+        assert "etc/systemd/system/docker-ghost.service" in broken_vio["source"]
+        assert broken_vio["severity"] == 8.0
+        assert broken_vio["type"] == "alert"
+
+    def test_managed_vs_orphaned_classification(self, make_rootfs):
+        """Containers in systemd are managed=True, others are managed=False."""
+        r = make_rootfs
+        cid_a = "mng" * 8 + "0" * 40
+        cid_b = "orp" * 8 + "0" * 40
+        r.add_docker_container(
+            cid_a,
+            config_v2={"Name": "/managed_ctr"},
+            hostconfig={"Privileged": False, "ReadonlyRootfs": True, "Binds": []},
+        )
+        r.add_docker_container(
+            cid_b,
+            config_v2={"Name": "/orphaned_ctr"},
+            hostconfig={"Privileged": False, "ReadonlyRootfs": True, "Binds": []},
+        )
+        ctx = _make_context()
+        # Only register managed_ctr in systemd
+        ctx.mark_systemd_started("docker", "managed_ctr")
+        ctx.set_service_meta(
+            "docker",
+            "managed_ctr",
+            {
+                "user": "dockeruser",
+                "unit": "docker-managed.service",
+                "path": "etc/systemd/system/docker-managed.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        by_name = {c["container"]: c for c in result["results"]}
+        assert by_name["managed_ctr"]["managed"] is True
+        assert by_name["orphaned_ctr"]["managed"] is False
 
 
 # ------------------------------------------------------------------ #
@@ -802,6 +879,7 @@ class TestPodmanScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("podman", "safepod")
         ctx.set_service_meta(
             "podman",
             "safepod",
@@ -818,6 +896,7 @@ class TestPodmanScanner:
         assert len(safepod) == 1
         assert safepod[0]["status"] == "clean"
         assert safepod[0]["violations"] == []
+        assert safepod[0]["managed"] is True
 
     def test_cap_sys_admin_alert(self, make_rootfs):
         r = make_rootfs
@@ -1402,6 +1481,7 @@ class TestPodmanScanner:
         assert len(uid_vio) == 1
         assert uid_vio[0]["severity"] == 2.0
         assert uid_vio[0]["type"] == "info"
+        assert containers[0]["managed"] is False
 
     def test_rootful_uid0_keeps_full_severity(self, make_rootfs):
         """Rootful Podman UID 0 keeps original high severity."""
@@ -1430,6 +1510,7 @@ class TestPodmanScanner:
         assert len(uid_vio) == 1
         assert uid_vio[0]["severity"] == 7.0
         assert uid_vio[0]["type"] == "alert"
+        assert containers[0]["managed"] is False
 
     def test_systemd_service_missing_detected(self, make_rootfs):
         """Container without systemd service should trigger alert."""
@@ -1454,6 +1535,7 @@ class TestPodmanScanner:
         result = podman.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "systemd_service_missing" in vio_ids
+        assert result["results"][0]["managed"] is False
 
     def test_systemd_caps_unrestricted_detected(self, make_rootfs):
         """Systemd service without CapabilityBoundingSet should trigger warning."""
@@ -1479,6 +1561,7 @@ class TestPodmanScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("podman", "nocaps_podman")
         ctx.set_service_meta(
             "podman",
             "nocaps_podman",
@@ -1519,6 +1602,7 @@ class TestPodmanScanner:
             },
         )
         ctx = _make_context()
+        ctx.mark_systemd_started("podman", "withcaps_podman")
         ctx.set_service_meta(
             "podman",
             "withcaps_podman",
@@ -1534,6 +1618,29 @@ class TestPodmanScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "systemd_caps_unrestricted" not in vio_ids
         assert "systemd_service_missing" not in vio_ids
+
+    def test_broken_systemd_service_detected(self, make_rootfs):
+        """Systemd references container but config not on disk."""
+        r = make_rootfs
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "ghost")
+        ctx.set_service_meta(
+            "podman",
+            "ghost",
+            {
+                "user": "podmanuser",
+                "unit": "podman-ghost.service",
+                "path": "etc/systemd/system/podman-ghost.service",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        ghost = [r for r in result["results"] if r["container"] == "ghost"]
+        assert len(ghost) == 1
+        assert ghost[0]["managed"] is True
+        vio_ids = [v["id"] for v in ghost[0]["violations"]]
+        assert "systemd_service_broken" in vio_ids
 
 
 # ------------------------------------------------------------------ #
@@ -1598,6 +1705,7 @@ class TestLxcScanner:
         assert len(containers) == 1
         assert containers[0]["status"] == "clean"
         assert containers[0]["violations"] == []
+        assert containers[0]["managed"] is True
 
     def test_missing_idmap(self, make_rootfs):
         r = make_rootfs
@@ -1978,6 +2086,7 @@ class TestLxcScanner:
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "systemd_service_missing" in vio_ids
+        assert result["results"][0]["managed"] is False
 
     def test_systemd_caps_unrestricted_detected(self, make_rootfs):
         """LXC container with systemd service but no CapabilityBoundingSet."""
@@ -2067,6 +2176,7 @@ class TestLxcScanner:
                 "ambient_capabilities": "",
             },
         )
+        ctx.mark_systemd_started("lxc", "nsshare")
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "namespace_sharing_enabled" in vio_ids
@@ -2095,6 +2205,7 @@ class TestLxcScanner:
                 "ambient_capabilities": "",
             },
         )
+        ctx.mark_systemd_started("lxc", "nskeep")
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "namespace_keep_enabled" in vio_ids
@@ -2123,6 +2234,7 @@ class TestLxcScanner:
                 "ambient_capabilities": "",
             },
         )
+        ctx.mark_systemd_started("lxc", "mntauto")
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "mount_auto_dangerous" in vio_ids
@@ -2154,6 +2266,7 @@ class TestLxcScanner:
                 "ambient_capabilities": "",
             },
         )
+        ctx.mark_systemd_started("lxc", "mntsafe")
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "mount_auto_dangerous" not in vio_ids
@@ -2182,6 +2295,7 @@ class TestLxcScanner:
                 "ambient_capabilities": "",
             },
         )
+        ctx.mark_systemd_started("lxc", "selinux")
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "selinux_unconfined" in vio_ids
@@ -2213,9 +2327,33 @@ class TestLxcScanner:
                 "ambient_capabilities": "",
             },
         )
+        ctx.mark_systemd_started("lxc", "selinuxok")
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "selinux_unconfined" not in vio_ids
+
+    def test_broken_systemd_service_detected(self, make_rootfs):
+        """Systemd references LXC container but config not on disk."""
+        r = make_rootfs
+        ctx = _make_context()
+        ctx.mark_systemd_started("lxc", "ghost")
+        ctx.set_service_meta(
+            "lxc",
+            "ghost",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-ghost.service",
+                "path": "etc/systemd/system/lxc-ghost.service",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        ghost = [r for r in result["results"] if r["container"] == "ghost"]
+        assert len(ghost) == 1
+        assert ghost[0]["managed"] is True
+        vio_ids = [v["id"] for v in ghost[0]["violations"]]
+        assert "systemd_service_broken" in vio_ids
 
 
 # ------------------------------------------------------------------ #

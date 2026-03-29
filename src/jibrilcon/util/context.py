@@ -124,6 +124,18 @@ class ScanContext:
         with self._lock:
             return container_name in self._systemd_started.get(engine, set())
 
+    def get_started_containers(self, engine: str) -> set[str]:
+        """
+        Return all container names that systemd is configured to start
+        for the given *engine*.
+
+        This is the primary entry point for the systemd-driven discovery
+        model: scanners should iterate these names first (Phase 1),
+        then sweep file paths for orphaned containers (Phase 2).
+        """
+        with self._lock:
+            return set(self._systemd_started.get(engine, set()))
+
     def is_user_missing(self, container_name: str) -> bool:
         """
         Return True if the container's systemd service lacked a non-root

@@ -1110,6 +1110,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         "container": cname,
                         "violations": vios,
                         "status": status,
+                        "managed": True,
                     }
                 continue
 
@@ -1142,6 +1143,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     "container": "",
                     "violations": vios,
                     "status": status,
+                    "managed": True,
                 }
 
             elif kind in _RBAC_BINDING_KINDS and rbac_rules:
@@ -1172,6 +1174,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     "container": "",
                     "violations": vios,
                     "status": status,
+                    "managed": True,
                 }
 
             # --- Infrastructure resources ---
@@ -1211,6 +1214,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     "container": "",
                     "violations": vios,
                     "status": status,
+                    "managed": True,
                 }
 
     # --- Node / kubelet configuration scanning ---
@@ -1258,6 +1262,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                 "container": "",
                 "violations": vios,
                 "status": status,
+                "managed": data.get("systemd_service_found", True),
             }
 
     # --- Control plane component scanning ---
@@ -1315,6 +1320,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     "container": "",
                     "violations": vios,
                     "status": status,
+                    "managed": True,
                 }
 
         # K3s/RKE2: extract apiserver/controller-manager args from config.yaml
@@ -1360,6 +1366,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         "container": "",
                         "violations": vios,
                         "status": status,
+                        "managed": True,
                     }
 
             # kube-controller-manager-arg
@@ -1397,6 +1404,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         "container": "",
                         "violations": vios,
                         "status": status,
+                        "managed": True,
                     }
 
     summary = {

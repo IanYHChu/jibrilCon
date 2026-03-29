@@ -440,6 +440,180 @@ def _parse_mount_entry(entry: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------
+# Shared per-container analysis helper
+# ---------------------------------------------------------------------
+
+_MOUNT_ENTRY_RULE_IDS = frozenset(
+    {
+        "mount_proc_dangerous",
+        "mount_sys_dangerous",
+        "mount_run_dangerous",
+        "mount_usr_should_be_ro",
+        "mount_dev_should_be_ro",
+    }
+)
+
+
+def _analyze_lxc_container(
+    container_name: str,
+    cfg_path: Path,
+    entries: dict[str, list[str]],
+    context: ScanContext,
+    config_rules: list[dict],
+    mount_rules: list[dict],
+    mount_path: str,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """
+    Analyse one LXC container.
+
+    Parameters
+    ----------
+    container_name : str
+        Logical container name (typically directory name).
+    cfg_path : Path
+        Resolved config file path on the host filesystem.
+    entries : dict
+        Already-merged (base + rcfile + CLI overrides) config entries.
+    context : ScanContext
+        Thread-safe shared state.
+    config_rules, mount_rules : list[dict]
+        Pre-split rule lists.
+    mount_path : str
+        Mounted rootfs path.
+
+    Returns
+    -------
+    (base_data, all_violations)
+    """
+    idmap_info = _extract_idmap(entries)
+    capdrop_info = _extract_cap_drop(entries)
+    apparmor_info = _extract_apparmor_profile(entries)
+    net_info = _extract_net_type(entries)
+    privs_info = _extract_no_new_privs(entries)
+    seccomp_info = _extract_seccomp_profile(entries)
+    capkeep_info = _extract_cap_keep(entries)
+    ns_share_info = _extract_namespace_sharing(entries)
+    ns_keep_info = _extract_namespace_keep(entries)
+    mount_auto_info = _extract_mount_auto(entries)
+    selinux_info = _extract_selinux_context(entries)
+
+    # infer runs_as_root from context or missing mappings
+    systemd_root = context.is_systemd_started(
+        "lxc", container_name
+    ) and context.is_user_missing(container_name)
+    mapping_root = idmap_info.get("uidmap") is None and idmap_info.get("gidmap") is None
+    runs_as_root = systemd_root or mapping_root
+
+    # Systemd service cross-validation (automotive: all containers
+    # MUST have a corresponding systemd service)
+    svc_meta = context.get_service_meta("lxc", container_name)
+    systemd_service_found = bool(svc_meta)
+    systemd_caps_unrestricted = systemd_service_found and not svc_meta.get(
+        "cap_bounding_set"
+    )
+
+    base_data: dict[str, object] = {
+        **idmap_info,
+        **capdrop_info,
+        **apparmor_info,
+        **net_info,
+        **privs_info,
+        **seccomp_info,
+        **capkeep_info,
+        **ns_share_info,
+        **ns_keep_info,
+        **mount_auto_info,
+        **selinux_info,
+        "runs_as_root": runs_as_root,
+        "systemd_service_found": systemd_service_found,
+        "systemd_caps_unrestricted": systemd_caps_unrestricted,
+    }
+
+    # ------------------ config rules ------------------
+    config_vios_raw = evaluate_rules(base_data, config_rules)
+
+    def _resolve_config_lines(_v, used_fields):
+        lines = []
+        for f in used_fields:
+            cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
+            raw_lines = entries.get(cfg_key)
+            if raw_lines:
+                lines.extend(raw_lines)
+            else:
+                lines.append(f"<missing> {cfg_key}")
+        return lines
+
+    config_vios = process_violations(
+        config_vios_raw,
+        str(cfg_path),
+        mount_path,
+        _resolve_config_lines,
+    )
+
+    # ------------------ mount rules -------------------
+    mount_results: list[dict[str, object]] = []
+    for line in entries.get("lxc.mount.entry", []):
+        if not isinstance(line, str):
+            continue
+        mentry = _parse_mount_entry(line)
+        vios_raw = evaluate_rules(mentry, mount_rules)
+
+        def _resolve_mount_lines(_v, used_fields, _line=line):
+            lines = [_line] if _line else []
+            for f in used_fields - {"source", "options"}:
+                lines.append(f"<missing> {f}")
+            return lines
+
+        mount_results.extend(
+            process_violations(
+                vios_raw, str(cfg_path), mount_path, _resolve_mount_lines
+            )
+        )
+
+    all_vios = config_vios + mount_results
+    return base_data, all_vios
+
+
+def _prepare_entries(
+    container_name: str,
+    cfg_path: Path,
+    context: ScanContext,
+    mount_path: str,
+) -> dict[str, list[str]]:
+    """
+    Load, merge rcfile, and apply CLI overrides for a single container.
+
+    Returns the fully merged config entries dict.
+    """
+    # 1) load default config
+    entries = _parse_lxc_config(cfg_path)
+
+    # 2) acquire Exec* command lines
+    exec_lines = context.get_exec_lines("lxc", container_name)
+    if not exec_lines:
+        exec_lines = _find_systemd_exec_lines(mount_path, container_name)
+
+    # 3) derive rcfile / -s CLI overrides
+    rcfile_path, override_tokens = _extract_cli_params(exec_lines)
+
+    # merge rcfile if present
+    if rcfile_path:
+        try:
+            rc_abs = safe_join(mount_path, rcfile_path.lstrip("/"))
+        except ValueError:
+            rc_abs = None
+        if rc_abs and rc_abs.is_file():
+            rc_entries = _parse_lxc_config(rc_abs)
+            entries = _merge_entries(entries, rc_entries)
+
+    # apply -s/--define overrides (highest priority)
+    if override_tokens:
+        _apply_cli_overrides(entries, override_tokens)
+
+    return entries
+
+
+# ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
 
@@ -447,6 +621,19 @@ def _parse_mount_entry(entry: str) -> dict[str, str]:
 def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, object]:
     """
     Scan LXC container configs under *mount_path*.
+
+    Discovery model
+    ---------------
+    Phase 1 (systemd-driven):
+        Process containers that ScanContext knows about from systemd
+        services first.  If a systemd-registered container has no
+        matching config on disk, emit a ``systemd_service_broken``
+        violation.
+
+    Phase 2 (file-path sweep):
+        Walk rootfs for all LXC configs (existing os.walk logic), skip
+        those already handled in Phase 1, mark remainder as orphaned
+        (``managed=False``).
 
     Raises
     ------
@@ -466,13 +653,6 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
         logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
     # Mount-entry rules operate on per-entry dicts (source/options fields);
     # mount_auto_dangerous evaluates base_data so it belongs in config_rules.
-    _MOUNT_ENTRY_RULE_IDS = {
-        "mount_proc_dangerous",
-        "mount_sys_dangerous",
-        "mount_run_dangerous",
-        "mount_usr_should_be_ro",
-        "mount_dev_should_be_ro",
-    }
     mount_rules = [r for r in all_rules if r["id"] in _MOUNT_ENTRY_RULE_IDS]
     config_rules = [r for r in all_rules if r["id"] not in _MOUNT_ENTRY_RULE_IDS]
 
@@ -480,125 +660,66 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
     alert_count = warning_count = total_containers = 0
     start_ts = time.time()
 
+    # ----- Discover all configs on disk (os.walk preserved) -----
     all_cfgs = _get_lxc_rootfs_config_candidates(mount_path)
     active_cfgs = _filter_active_lxc_configs(all_cfgs, mount_path)
 
-    for cfg_path in active_cfgs:
-        container_name = cfg_path.parent.name
+    # Build name -> cfg_path lookup for on-disk configs
+    on_disk: dict[str, Path] = {
+        cfg_path.parent.name: cfg_path for cfg_path in active_cfgs
+    }
 
-        # 1) load default config
-        entries = _parse_lxc_config(cfg_path)
+    # Track names handled in Phase 1 so Phase 2 skips them
+    phase1_names: set[str] = set()
 
-        # 2) acquire Exec* command lines  -----------------
-        exec_lines = context.get_exec_lines("lxc", container_name)
-        if not exec_lines:
-            exec_lines = _find_systemd_exec_lines(mount_path, container_name)
+    # ----- Phase 1: systemd-driven containers -----
+    systemd_names = context.get_started_containers("lxc")
+    for name in sorted(systemd_names):
+        phase1_names.add(name)
+        cfg_path = on_disk.get(name)
 
-        # 3) derive rcfile / -s CLI overrides ------------
-        rcfile_path, override_tokens = _extract_cli_params(exec_lines)
-
-        # merge rcfile if present
-        if rcfile_path:
-            try:
-                rc_abs = safe_join(mount_path, rcfile_path.lstrip("/"))
-            except ValueError:
-                rc_abs = None
-            if rc_abs and rc_abs.is_file():
-                rc_entries = _parse_lxc_config(rc_abs)
-                entries = _merge_entries(entries, rc_entries)
-
-        # apply -s/--define overrides (highest priority)
-        if override_tokens:
-            _apply_cli_overrides(entries, override_tokens)
-
-        idmap_info = _extract_idmap(entries)
-        capdrop_info = _extract_cap_drop(entries)
-        apparmor_info = _extract_apparmor_profile(entries)
-        net_info = _extract_net_type(entries)
-        privs_info = _extract_no_new_privs(entries)
-        seccomp_info = _extract_seccomp_profile(entries)
-        capkeep_info = _extract_cap_keep(entries)
-        ns_share_info = _extract_namespace_sharing(entries)
-        ns_keep_info = _extract_namespace_keep(entries)
-        mount_auto_info = _extract_mount_auto(entries)
-        selinux_info = _extract_selinux_context(entries)
-
-        # infer runs_as_root from context or missing mappings
-        systemd_root = context.is_systemd_started(
-            "lxc", container_name
-        ) and context.is_user_missing(container_name)
-        mapping_root = (
-            idmap_info.get("uidmap") is None and idmap_info.get("gidmap") is None
-        )
-        runs_as_root = systemd_root or mapping_root
-
-        # Systemd service cross-validation (automotive: all containers
-        # MUST have a corresponding systemd service)
-        svc_meta = context.get_service_meta("lxc", container_name)
-        systemd_service_found = bool(svc_meta)
-        systemd_caps_unrestricted = systemd_service_found and not svc_meta.get(
-            "cap_bounding_set"
-        )
-
-        base_data = {
-            **idmap_info,
-            **capdrop_info,
-            **apparmor_info,
-            **net_info,
-            **privs_info,
-            **seccomp_info,
-            **capkeep_info,
-            **ns_share_info,
-            **ns_keep_info,
-            **mount_auto_info,
-            **selinux_info,
-            "runs_as_root": runs_as_root,
-            "systemd_service_found": systemd_service_found,
-            "systemd_caps_unrestricted": systemd_caps_unrestricted,
-        }
-
-        # ------------------ config rules ------------------
-        config_vios_raw = evaluate_rules(base_data, config_rules)
-
-        def _resolve_config_lines(_v, used_fields):
-            lines = []
-            for f in used_fields:
-                cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
-                raw_lines = entries.get(cfg_key)
-                if raw_lines:
-                    lines.extend(raw_lines)
-                else:
-                    lines.append(f"<missing> {cfg_key}")
-            return lines
-
-        config_vios = process_violations(
-            config_vios_raw,
-            str(cfg_path),
-            mount_path,
-            _resolve_config_lines,
-        )
-
-        # ------------------ mount rules -------------------
-        mount_results = []
-        for line in entries.get("lxc.mount.entry", []):
-            if not isinstance(line, str):
-                continue
-            mentry = _parse_mount_entry(line)
-            vios_raw = evaluate_rules(mentry, mount_rules)
-
-            def _resolve_mount_lines(_v, used_fields, _line=line):
-                lines = [_line] if _line else []
-                for f in used_fields - {"source", "options"}:
-                    lines.append(f"<missing> {f}")
-                return lines
-
-            mount_results.extend(
-                process_violations(
-                    vios_raw, str(cfg_path), mount_path, _resolve_mount_lines
-                )
+        if cfg_path is None:
+            # Broken service: systemd says container exists but config
+            # is not found on disk.
+            svc_meta = context.get_service_meta("lxc", name)
+            svc_path = svc_meta.get("path", "<unknown>")
+            broken_vio: dict[str, object] = {
+                "id": "systemd_service_broken",
+                "type": "alert",
+                "severity": 8.0,
+                "description": (
+                    "Systemd service references an LXC container whose "
+                    "configuration was not found on disk"
+                ),
+                "risk": (
+                    "The systemd service will fail to start this container "
+                    "at boot via lxc-start. This may indicate a deleted "
+                    "container, moved config, or filesystem corruption."
+                ),
+                "remediation": (
+                    "Verify the LXC container config exists, or remove "
+                    "the obsolete systemd service."
+                ),
+                "source": f"/{svc_path}",
+                "lines": [f"Container '{name}' not found in any LXC config path"],
+            }
+            results.append(
+                {
+                    "container": name,
+                    "violations": [broken_vio],
+                    "status": "violated",
+                    "managed": True,
+                }
             )
+            alert_count += 1
+            total_containers += 1
+            continue
 
-        all_vios = config_vios + mount_results
+        entries = _prepare_entries(name, cfg_path, context, mount_path)
+        base_data, all_vios = _analyze_lxc_container(
+            name, cfg_path, entries, context, config_rules, mount_rules, mount_path
+        )
+
         status = "violated" if all_vios else "clean"
         if any(v["type"] == "alert" for v in all_vios):
             alert_count += 1
@@ -607,9 +728,37 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
 
         results.append(
             {
-                "container": container_name,
+                "container": name,
                 "violations": all_vios,
                 "status": status,
+                "managed": True,
+            }
+        )
+        total_containers += 1
+
+    # ----- Phase 2: file-path sweep (orphaned containers) -----
+    for name in sorted(on_disk):
+        if name in phase1_names:
+            continue  # already handled in Phase 1
+
+        cfg_path = on_disk[name]
+        entries = _prepare_entries(name, cfg_path, context, mount_path)
+        base_data, all_vios = _analyze_lxc_container(
+            name, cfg_path, entries, context, config_rules, mount_rules, mount_path
+        )
+
+        status = "violated" if all_vios else "clean"
+        if any(v["type"] == "alert" for v in all_vios):
+            alert_count += 1
+        elif any(v["type"] == "warning" for v in all_vios):
+            warning_count += 1
+
+        results.append(
+            {
+                "container": name,
+                "violations": all_vios,
+                "status": status,
+                "managed": False,
             }
         )
         total_containers += 1

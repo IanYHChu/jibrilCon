@@ -306,6 +306,101 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------
+# Per-container analysis helper
+# ---------------------------------------------------------------------
+
+
+def _analyze_container(
+    name: str,
+    cfg_path: str,
+    host_path: str,
+    runtime_mode: str,
+    context: ScanContext,
+    rules: list[dict[str, Any]],
+    mount_path: str,
+) -> tuple[list[dict[str, Any]], str]:
+    """
+    Load config, apply overrides, evaluate rules for a single container.
+
+    Returns
+    -------
+    tuple[list[dict], str]
+        (violations, status) where status is "violated" or "clean".
+    """
+    # 1) load default config
+    try:
+        cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
+        host_json = load_json_or_empty(resolve_path(host_path, mount_path))
+    except RuntimeError as exc:
+        logger.warning("Skipping container %s: %s", name, exc)
+        return [], "clean"
+
+    # 2) acquire Exec* command lines
+    exec_lines: list[str] = context.get_exec_lines("docker", name)
+    override_cfg_dir: str | None = None
+    for line in exec_lines:
+        m = _CONFIG_RE.search(line)
+        if m:
+            override_cfg_dir = m.group("confdir")
+            break
+
+    if override_cfg_dir:
+        try:
+            conf_json_path = safe_join(
+                mount_path,
+                override_cfg_dir.lstrip("/"),
+                "config.json",
+            )
+        except ValueError as exc:
+            logger.warning("Skipping Docker config override: %s", exc)
+            conf_json_path = None
+        if conf_json_path and os.path.exists(conf_json_path):
+            override_cfg = load_json_or_empty(conf_json_path)
+            if override_cfg:
+                # merge into main config
+                deep_merge(cfg_json, override_cfg)
+                # merge HostConfig block if provided
+                host_override = override_cfg.get("HostConfig")
+                if isinstance(host_override, dict):
+                    deep_merge(host_json, host_override)
+
+    data = _extract_fields(cfg_json, host_json)
+    data["runtime_mode"] = runtime_mode
+
+    # merge systemd inference: service_user_missing flag
+    data["service_user_missing"] = context.is_user_missing(name)
+
+    # Systemd service cross-validation (automotive: all containers
+    # MUST have a corresponding systemd service)
+    svc_meta = context.get_service_meta("docker", name)
+    data["systemd_service_found"] = bool(svc_meta)
+    data["systemd_user"] = svc_meta.get("user", "")
+    data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
+        "cap_bounding_set"
+    )
+
+    vios_raw = evaluate_rules(data, rules)
+
+    def _resolve_lines(_v: Any, used_fields: set[str]) -> list[str]:
+        lines: list[str] = []
+        for f in used_fields:
+            cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
+            val: Any = cfg_json if "HostConfig" not in cfg_key else host_json
+            for part in cfg_key.split("."):
+                val = val.get(part, {}) if isinstance(val, dict) else {}
+            if val:
+                lines.append(f"{cfg_key} = {val}")
+            else:
+                lines.append(f"<missing> {cfg_key}")
+        return lines
+
+    vios = process_violations(vios_raw, cfg_path, mount_path, _resolve_lines)
+
+    status = "violated" if vios else "clean"
+    return vios, status
+
+
+# ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
 
@@ -313,6 +408,16 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
 def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     """
     Scan Docker container configurations under *mount_path*.
+
+    Uses a two-phase systemd-driven discovery model:
+
+    * **Phase 1** -- Process containers that ScanContext knows about from
+      systemd services first.  If systemd references a container whose
+      config is not found on disk, emit a ``systemd_service_broken``
+      violation.
+    * **Phase 2** -- Sweep file paths for all containers on disk, skip
+      those already processed in Phase 1, and mark the remainder as
+      orphaned (``managed=False``).
 
     Parameters
     ----------
@@ -342,86 +447,84 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
+    # Build a lookup of ALL containers found on disk
+    on_disk: dict[str, tuple[str, str, str]] = {}
     for name, cfg_path, host_path, runtime_mode in _discover_container_dirs(mount_path):
-        # 1) load default config
-        try:
-            cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
-            host_json = load_json_or_empty(resolve_path(host_path, mount_path))
-        except RuntimeError as exc:
-            logger.warning("Skipping container %s: %s", name, exc)
-            continue
+        on_disk[name] = (cfg_path, host_path, runtime_mode)
 
-        # 2) acquire Exec* command lines  -----------------
-        exec_lines: list[str] = context.get_exec_lines("docker", name)
-        override_cfg_dir: str | None = None
-        for line in exec_lines:
-            m = _CONFIG_RE.search(line)
-            if m:
-                override_cfg_dir = m.group("confdir")
-                break
+    # ---- Phase 1: systemd-managed containers (primary discovery path) ----
+    systemd_names = context.get_started_containers("docker")
 
-        if override_cfg_dir:
-            try:
-                conf_json_path = safe_join(
-                    mount_path,
-                    override_cfg_dir.lstrip("/"),
-                    "config.json",
-                )
-            except ValueError as exc:
-                logger.warning("Skipping Docker config override: %s", exc)
-                conf_json_path = None
-            if conf_json_path and os.path.exists(conf_json_path):
-                override_cfg = load_json_or_empty(conf_json_path)
-                if override_cfg:
-                    # merge into main config
-                    deep_merge(cfg_json, override_cfg)
-                    # merge HostConfig block if provided
-                    host_override = override_cfg.get("HostConfig")
-                    if isinstance(host_override, dict):
-                        deep_merge(host_json, host_override)
+    for name in sorted(systemd_names):
+        if name in on_disk:
+            cfg_path, host_path, runtime_mode = on_disk[name]
+            vios, status = _analyze_container(
+                name, cfg_path, host_path, runtime_mode, context, rules, mount_path
+            )
+            if any(v["type"] == "alert" for v in vios):
+                alert_count += 1
+            elif any(v["type"] == "warning" for v in vios):
+                warn_count += 1
+            containers[name] = {
+                "container": name,
+                "violations": vios,
+                "status": status,
+                "managed": True,
+            }
+        else:
+            # Broken service: systemd references container not found on disk
+            svc_meta = context.get_service_meta("docker", name)
+            source = "/" + svc_meta.get("path", "unknown")
+            containers[name] = {
+                "container": name,
+                "violations": [
+                    {
+                        "id": "systemd_service_broken",
+                        "type": "alert",
+                        "severity": 8.0,
+                        "description": (
+                            "Systemd service references a Docker container "
+                            "whose configuration was not found on disk"
+                        ),
+                        "risk": (
+                            "The systemd service will fail to start this "
+                            "container at boot. This may indicate a deleted "
+                            "container, misconfigured data-root, or "
+                            "filesystem corruption."
+                        ),
+                        "remediation": (
+                            "Verify the container exists and the Docker "
+                            "data-root path is correct, or remove the "
+                            "obsolete systemd service."
+                        ),
+                        "source": source,
+                        "lines": [
+                            f"Container '{name}' not found in any Docker data-root"
+                        ],
+                    }
+                ],
+                "status": "violated",
+                "managed": True,
+            }
+            alert_count += 1
 
-        data = _extract_fields(cfg_json, host_json)
-        data["runtime_mode"] = runtime_mode
-
-        # merge systemd inference: service_user_missing flag
-        data["service_user_missing"] = context.is_user_missing(name)
-
-        # Systemd service cross-validation (automotive: all containers
-        # MUST have a corresponding systemd service)
-        svc_meta = context.get_service_meta("docker", name)
-        data["systemd_service_found"] = bool(svc_meta)
-        data["systemd_user"] = svc_meta.get("user", "")
-        data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
-            "cap_bounding_set"
+    # ---- Phase 2: orphaned containers (found on disk but NOT in systemd) ----
+    for name in sorted(on_disk):
+        if name in containers:
+            continue  # already processed in Phase 1
+        cfg_path, host_path, runtime_mode = on_disk[name]
+        vios, status = _analyze_container(
+            name, cfg_path, host_path, runtime_mode, context, rules, mount_path
         )
-
-        vios_raw = evaluate_rules(data, rules)
-
-        def _resolve_lines(_v, used_fields):
-            lines = []
-            for f in used_fields:
-                cfg_key = _FIELD_TO_CONFIG_KEY.get(f, f)
-                val = cfg_json if "HostConfig" not in cfg_key else host_json
-                for part in cfg_key.split("."):
-                    val = val.get(part, {}) if isinstance(val, dict) else {}
-                if val:
-                    lines.append(f"{cfg_key} = {val}")
-                else:
-                    lines.append(f"<missing> {cfg_key}")
-            return lines
-
-        vios = process_violations(vios_raw, cfg_path, mount_path, _resolve_lines)
-
-        status = "violated" if vios else "clean"
         if any(v["type"] == "alert" for v in vios):
             alert_count += 1
         elif any(v["type"] == "warning" for v in vios):
             warn_count += 1
-
         containers[name] = {
             "container": name,
             "violations": vios,
             "status": status,
+            "managed": False,
         }
 
     summary = {

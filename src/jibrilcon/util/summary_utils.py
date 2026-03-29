@@ -84,6 +84,13 @@ def generate_final_report(scanner_results: list[dict[str, Any]]) -> dict[str, An
     Build a unified report containing all scanner outputs plus a merged
     summary section.
 
+    Each result entry may carry a ``managed`` flag (True/False).  Entries
+    with ``managed=False`` are separated into an ``orphaned`` list on each
+    scanner block and excluded from the ``clean``/``violated`` tallies.
+    Orphaned containers represent configs found on disk **without** a
+    corresponding systemd service -- a distinct risk in automotive /
+    embedded environments.
+
     Parameters
     ----------
     scanner_results : list[dict]
@@ -94,13 +101,26 @@ def generate_final_report(scanner_results: list[dict[str, Any]]) -> dict[str, An
     """
     final: dict[str, Any] = {"report": scanner_results, "summary": {}}
     summary = final["summary"]
+    total_orphaned = 0
 
     for block in scanner_results:
         name = block.get("scanner", "unknown")
         part_summary = block.get("summary", {})
-        result_list = block.get("results", [])
+        all_results = block.get("results", [])
+
+        # Separate managed from orphaned (default managed=True for
+        # backward compatibility with scanners that don't set the flag)
+        managed = [r for r in all_results if r.get("managed", True)]
+        orphaned = [r for r in all_results if not r.get("managed", True)]
+
+        block["results"] = managed
+        if orphaned:
+            block["orphaned"] = orphaned
+        total_orphaned += len(orphaned)
 
         _merge_summaries(summary, part_summary, scanner_name=name)
-        _merge_results_stats(summary, result_list)
+        _merge_results_stats(summary, managed)
+
+    summary["orphaned"] = total_orphaned
 
     return final

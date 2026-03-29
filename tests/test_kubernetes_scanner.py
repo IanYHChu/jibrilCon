@@ -65,6 +65,7 @@ spec:
         assert result["summary"]["kubernetes_scanned"] == 1
         assert result["results"][0]["status"] == "clean"
         assert result["results"][0]["violations"] == []
+        assert result["results"][0]["managed"] is True
 
     def test_privileged_pod(self, tmp_path):
         root = _make_rootfs(tmp_path)
@@ -1318,6 +1319,7 @@ rules:
         assert len(rbac) == 1
         vio_ids = [v["id"] for v in rbac[0]["violations"]]
         assert "rbac_wildcard_verbs" in vio_ids
+        assert rbac[0]["managed"] is True
 
     def test_wildcard_resources(self, tmp_path):
         root = _make_rootfs(tmp_path)
@@ -1596,6 +1598,7 @@ metadata:
         ns = [r for r in result["results"] if r["kind"] == "Namespace"]
         assert len(ns) == 1
         assert ns[0]["status"] == "clean"
+        assert ns[0]["managed"] is True
 
 
 class TestSecretPlaintext:
@@ -1985,6 +1988,7 @@ kubelet-arg:
         assert len(node) == 1
         vio_ids = [v["id"] for v in node[0]["violations"]]
         assert "kubelet_systemd_service_missing" in vio_ids
+        assert node[0]["managed"] is False
 
     def test_rke2_systemd_service_missing(self, tmp_path):
         """RKE2 daemon without systemd service triggers alert."""
@@ -2091,6 +2095,7 @@ kubelet-arg:
         vio_ids = [v["id"] for v in node[0]["violations"]]
         assert "kubelet_systemd_service_missing" not in vio_ids
         assert "kubelet_systemd_caps_unrestricted" not in vio_ids
+        assert node[0]["managed"] is True
 
     def test_rke2_agent_service_meta_found(self, tmp_path):
         """RKE2 agent service meta is found when server is absent."""
@@ -2194,6 +2199,7 @@ spec:
         assert len(apiserver) == 1
         assert apiserver[0]["status"] == "clean"
         assert apiserver[0]["violations"] == []
+        assert apiserver[0]["managed"] is True
 
 
 class TestControlPlaneEtcd:

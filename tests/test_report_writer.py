@@ -29,7 +29,7 @@ class TestReportWriter:
 class TestSummaryUtils:
     def test_empty_scanner_results(self):
         report = generate_final_report([])
-        assert report["summary"] == {}
+        assert report["summary"] == {"orphaned": 0}
         assert report["report"] == []
 
     def test_merge_multiple_scanners(self):
@@ -61,6 +61,7 @@ class TestSummaryUtils:
         assert s["warnings"] == 1
         assert s["clean"] == 1
         assert s["violated"] == 2
+        assert s["orphaned"] == 0
         assert s["scanners_run"] == ["docker", "podman"]
 
     def test_missing_status_counted_as_violated(self):
@@ -73,3 +74,4 @@ class TestSummaryUtils:
         ]
         report = generate_final_report(results)
         assert report["summary"]["violated"] == 1
+        assert report["summary"]["orphaned"] == 0

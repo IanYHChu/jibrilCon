@@ -51,12 +51,23 @@ def _print_summary(summary: dict[str, int], use_color: bool) -> None:
     warnings = summary.get("warnings", 0)
     clean = summary.get("clean", 0)
     violated = summary.get("violated", 0)
+    orphaned = summary.get("orphaned", 0)
 
-    print("\n=== Scan Summary ===")
+    print("\n=== Scan Summary (Managed Services) ===")
     print("  Alerts   :", _colour(str(alerts), "red", use_color))
     print("  Warnings :", _colour(str(warnings), "yellow", use_color))
     print("  Clean    :", _colour(str(clean), "green", use_color))
     print("  Violated :", _colour(str(violated), "red", use_color))
+    if orphaned:
+        print()
+        print("=== Orphaned Containers ===")
+        print(
+            "  Found    :",
+            _colour(str(orphaned), "red", use_color),
+        )
+        print(
+            "  (no systemd service -- unauthorized or misconfigured)",
+        )
     print("--------------------")
 
 
