@@ -837,6 +837,7 @@ _CONTROL_PLANE_MANIFESTS = {
     "kube-apiserver": "etc/kubernetes/manifests/kube-apiserver.yaml",
     "etcd": "etc/kubernetes/manifests/etcd.yaml",
     "kube-controller-manager": "etc/kubernetes/manifests/kube-controller-manager.yaml",
+    "kube-scheduler": "etc/kubernetes/manifests/kube-scheduler.yaml",
 }
 
 
@@ -1157,6 +1158,21 @@ _CM_FIELD_TO_KEY = {
     "cm_sa_key_missing": "--service-account-private-key-file",
     "cm_root_ca_missing": "--root-ca-file",
     "cm_sa_credentials_disabled": "--use-service-account-credentials",
+}
+
+
+def _extract_scheduler_fields(args: dict[str, str]) -> dict[str, Any]:
+    """Extract security fields from kube-scheduler arguments."""
+    bind = args.get("bind-address", "")
+    return {
+        "scheduler_profiling_enabled": args.get("profiling", "true") != "false",
+        "scheduler_bind_not_localhost": bool(bind) and bind not in ("127.0.0.1", "::1"),
+    }
+
+
+_SCHEDULER_FIELD_TO_KEY = {
+    "scheduler_profiling_enabled": "--profiling",
+    "scheduler_bind_not_localhost": "--bind-address",
 }
 
 
@@ -1591,6 +1607,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                 elif component == "kube-controller-manager":
                     data = _extract_controller_manager_fields(args)
                     field_map = _CM_FIELD_TO_KEY
+                elif component == "kube-scheduler":
+                    data = _extract_scheduler_fields(args)
+                    field_map = _SCHEDULER_FIELD_TO_KEY
                 else:
                     continue
 

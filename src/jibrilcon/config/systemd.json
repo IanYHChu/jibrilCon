@@ -52,7 +52,5 @@
     "AmbientCapabilities"
   ],
   "extraction_patterns": {
-    "CapabilityBoundingSet": "CapabilityBoundingSet=(.*)",
-    "AmbientCapabilities": "AmbientCapabilities=(.*)"
   }
 }

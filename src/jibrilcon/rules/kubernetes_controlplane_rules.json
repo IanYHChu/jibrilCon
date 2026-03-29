@@ -335,6 +335,48 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "scheduler_profiling_enabled",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "kube-scheduler has profiling enabled (default)",
+      "risk": "Profiling endpoints expose runtime performance data that can reveal scheduling decisions and resource utilization patterns, aiding targeted attacks against cluster workloads.",
+      "remediation": "Set --profiling=false on the kube-scheduler command line.",
+      "references": {
+        "mitre_attack": ["T1082"],
+        "cis_kubernetes_benchmark": ["1.4.1"],
+        "nist_800_190": ["4.3"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "scheduler_profiling_enabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "scheduler_bind_not_localhost",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "kube-scheduler is bound to a non-localhost address",
+      "risk": "Binding the scheduler to a non-localhost address exposes its endpoints to the network, potentially allowing unauthorized access to scheduling metrics and health checks.",
+      "remediation": "Set --bind-address=127.0.0.1 on the kube-scheduler command line.",
+      "references": {
+        "mitre_attack": ["T1082"],
+        "cis_kubernetes_benchmark": ["1.4.2"],
+        "nist_800_190": ["4.3"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "scheduler_bind_not_localhost",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

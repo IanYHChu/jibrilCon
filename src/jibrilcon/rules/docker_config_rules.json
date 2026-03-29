@@ -621,7 +621,8 @@
             "operator": "equals",
             "value": "rootless"
           },
-          "severity": 3.0
+          "severity": 3.0,
+          "type": "info"
         }
       ]
     }

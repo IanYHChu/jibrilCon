@@ -114,21 +114,24 @@ def run_scanners(
         return []
 
     results: list[dict[str, Any]] = []
+    submit_ts = _time.monotonic()
+
     with ThreadPoolExecutor(max_workers=min(max_workers, len(scanners))) as exe:
         future_map = {
             exe.submit(fn, mount_path, context=context): name for name, fn in scanners
         }
-        deadline = _time.monotonic() + scanner_timeout
         pending = set(future_map)
 
         while pending:
-            remaining = max(0.0, deadline - _time.monotonic())
+            # Each scanner gets the full timeout from submission time.
+            elapsed = _time.monotonic() - submit_ts
+            remaining = max(0.0, scanner_timeout - elapsed)
             done, pending = wait(
                 pending, timeout=remaining, return_when=FIRST_COMPLETED
             )
 
             # If wait() returned with no completed futures, every
-            # remaining future has exceeded the deadline.
+            # remaining future has exceeded the per-scanner deadline.
             if not done:
                 for fut in pending:
                     name = future_map[fut]
