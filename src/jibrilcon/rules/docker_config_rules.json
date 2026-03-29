@@ -529,6 +529,53 @@
       ]
     },
     {
+      "id": "socket_mount_writable",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Container engine socket mounted writable (docker.sock/containerd.sock/crio.sock)",
+      "risk": "A writable engine socket grants full control over the container engine. An attacker can create privileged containers, access host filesystem, and achieve complete host compromise.",
+      "remediation": "Remove the socket mount or add ':ro' to make it read-only. Use socket proxies with restricted API access if needed.",
+      "references": {"mitre_attack": ["T1611"], "cis_docker_benchmark": ["5.31"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "socket_mount_writable", "operator": "equals", "value": true}],
+      "severity_overrides": [
+        {"condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"}, "severity": 6.0, "type": "warning"}
+      ]
+    },
+    {
+      "id": "extra_hosts_present",
+      "type": "info",
+      "severity": 3.0,
+      "description": "Container has custom /etc/hosts entries via ExtraHosts",
+      "risk": "Custom host entries can redirect traffic to attacker-controlled addresses for service impersonation or DNS rebinding within the container.",
+      "remediation": "Review ExtraHosts entries. Remove unless required for the workload. Use DNS-based service discovery instead.",
+      "references": {"mitre_attack": ["T1557"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "has_extra_hosts", "operator": "equals", "value": true}]
+    },
+    {
+      "id": "ulimits_excessive",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "Container has excessively high nofile ulimit (>1M file descriptors)",
+      "risk": "Excessively high file descriptor limits can lead to file descriptor exhaustion attacks affecting the host and other containers.",
+      "remediation": "Set nofile ulimits to a reasonable value for the workload (typically 65536 or less).",
+      "references": {"mitre_attack": ["T1499.001"], "nist_800_190": ["4.5"]},
+      "logic": "and",
+      "conditions": [{"field": "ulimits_excessive", "operator": "equals", "value": true}]
+    },
+    {
+      "id": "selinux_privileged",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "SELinux label uses super-privileged container type (spc_t)",
+      "risk": "The spc_t SELinux type bypasses all mandatory access control. The container has unrestricted access to host resources as if SELinux were disabled.",
+      "remediation": "Use a confined SELinux type. Remove 'label=type:spc_t' from security options.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "selinux_privileged", "operator": "equals", "value": true}]
+    },
+    {
       "id": "systemd_service_missing",
       "type": "alert",
       "severity": 7.0,

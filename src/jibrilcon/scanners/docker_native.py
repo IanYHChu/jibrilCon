@@ -104,6 +104,10 @@ _FIELD_TO_CONFIG_KEY = {
     "daemon_icc_enabled": "/etc/docker/daemon.json icc",
     "dangerous_device_cgroup": "HostConfig.DeviceCgroupRules",
     "dangerous_device_mounted": "HostConfig.Devices",
+    "socket_mount_writable": "HostConfig.Binds",
+    "has_extra_hosts": "HostConfig.ExtraHosts",
+    "ulimits_excessive": "HostConfig.Ulimits",
+    "selinux_privileged": "HostConfig.SecurityOpt",
     "systemd_service_found": "systemd.service",
     "systemd_user": "systemd.User",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
@@ -351,6 +355,53 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         for d in devices
     )
 
+    # Docker socket mounted writable (container escape vector)
+    def _socket_writable(b: str) -> bool:
+        s = str(b)
+        parts = s.split(":")
+        if len(parts) < 2:
+            return False
+        src = parts[0]
+        _SOCKET_PATHS = {
+            "/var/run/docker.sock",
+            "/run/docker.sock",
+            "/run/containerd/containerd.sock",
+            "/var/run/crio/crio.sock",
+        }
+        if src not in _SOCKET_PATHS:
+            return False
+        if len(parts) < 3:
+            return True  # no options = default rw
+        return "ro" not in parts[2].split(",")
+
+    socket_mount_writable = any(_socket_writable(b) for b in binds)
+
+    # ExtraHosts -- custom /etc/hosts entries
+    extra_hosts = host.get("ExtraHosts") or []
+    if not isinstance(extra_hosts, list):
+        extra_hosts = []
+    has_extra_hosts = bool(extra_hosts)
+
+    # Ulimits -- excessively high nofile limit
+    ulimits = host.get("Ulimits") or []
+    if not isinstance(ulimits, list):
+        ulimits = []
+    _ULIMIT_NOFILE_THRESHOLD = 1048576  # 1M file descriptors is excessive
+    ulimits_excessive = any(
+        isinstance(u, dict)
+        and u.get("Name") == "nofile"
+        and (
+            u.get("Hard", 0) > _ULIMIT_NOFILE_THRESHOLD
+            or u.get("Soft", 0) > _ULIMIT_NOFILE_THRESHOLD
+        )
+        for u in ulimits
+    )
+
+    # SELinux super-privileged container type (spc_t)
+    selinux_privileged = any(
+        isinstance(o, str) and "label=type:spc_t" in o for o in sec_opts
+    )
+
     return {
         "privileged": privileged,
         "readonly_rootfs": readonly_rootfs,
@@ -373,6 +424,10 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         "logging_disabled": logging_disabled,
         "dangerous_device_cgroup": dangerous_device_cgroup,
         "dangerous_device_mounted": dangerous_device_mounted,
+        "socket_mount_writable": socket_mount_writable,
+        "has_extra_hosts": has_extra_hosts,
+        "ulimits_excessive": ulimits_excessive,
+        "selinux_privileged": selinux_privileged,
     }
 
 

@@ -570,6 +570,46 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "mount_dangerous_options",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Mount entry uses dangerous options (rbind, loop, or remount)",
+      "risk": "rbind recursively exposes parent mount tree including /proc. loop enables mounting arbitrary disk images. remount can change read-only mounts to writable, bypassing protections.",
+      "remediation": "Remove rbind, loop, and remount from mount options. Use specific bind mounts with minimal scope.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_dangerous_mount_options",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "nested_lxc_detected",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "LXC binaries detected inside container rootfs (nested LXC-in-LXC)",
+      "risk": "Nested containers add a second privilege boundary with compounded complexity. The inner container may bypass outer container security restrictions, especially if AppArmor nesting is enabled.",
+      "remediation": "Remove LXC binaries from the container rootfs unless nested containerization is explicitly required and properly hardened.",
+      "references": {
+        "mitre_attack": ["T1610"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "nested_lxc_detected",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,8 @@ _DANGEROUS_CAPS = frozenset(
     }
 )
 
+_UNSAFE_SYSCTL_PREFIXES = ("kernel.", "vm.", "net.ipv4.ip_forward")
+
 # Map rule field names to manifest paths (used by violation line resolver)
 _FIELD_TO_MANIFEST_KEY = {
     "privileged": "securityContext.privileged",
@@ -104,6 +107,9 @@ _FIELD_TO_MANIFEST_KEY = {
     "subpath_with_hostpath": "volumeMounts[].subPath + hostPath",
     "share_process_namespace": "spec.shareProcessNamespace",
     "image_pull_not_always": "spec.containers[].imagePullPolicy",
+    "has_unsafe_sysctls": "spec.securityContext.sysctls",
+    "selinux_not_set": "securityContext.seLinuxOptions",
+    "fsgroup_missing": "spec.securityContext.fsGroup",
 }
 
 # Pod spec path per resource kind
@@ -453,6 +459,22 @@ def _extract_container_fields(
     # --- shareProcessNamespace ---
     share_process_namespace = pod_spec.get("shareProcessNamespace", False) is True
 
+    # --- unsafe sysctls (pod-level) ---
+    sysctls = pod_sc.get("sysctls") or []
+    has_unsafe_sysctls = any(
+        isinstance(s, dict)
+        and any(str(s.get("name", "")).startswith(p) for p in _UNSAFE_SYSCTL_PREFIXES)
+        for s in sysctls
+    )
+
+    # --- SELinux not set ---
+    selinux_opts = sc.get("seLinuxOptions") or pod_sc.get("seLinuxOptions")
+    selinux_not_set = selinux_opts is None
+
+    # --- fsGroup missing (pod-level) ---
+    fsgroup = pod_sc.get("fsGroup")
+    fsgroup_missing = fsgroup is None
+
     return {
         "privileged": privileged,
         "runs_as_root": runs_as_root,
@@ -476,6 +498,9 @@ def _extract_container_fields(
         "subpath_with_hostpath": subpath_with_hostpath,
         "share_process_namespace": share_process_namespace,
         "image_pull_not_always": image_pull_not_always,
+        "has_unsafe_sysctls": has_unsafe_sysctls,
+        "selinux_not_set": selinux_not_set,
+        "fsgroup_missing": fsgroup_missing,
     }
 
 
@@ -677,7 +702,19 @@ _RBAC_FIELD_TO_KEY = {
 # Infrastructure resource field extraction
 # ---------------------------------------------------------------------
 
-_INFRA_KINDS = frozenset({"Namespace", "NetworkPolicy", "Secret"})
+_INFRA_KINDS = frozenset(
+    {
+        "Namespace",
+        "NetworkPolicy",
+        "Secret",
+        "PersistentVolume",
+        "PodSecurityPolicy",
+    }
+)
+
+_WEBHOOK_KINDS = frozenset(
+    {"ValidatingWebhookConfiguration", "MutatingWebhookConfiguration"}
+)
 
 
 def _extract_namespace_fields(doc: dict[str, Any]) -> dict[str, Any]:
@@ -726,12 +763,36 @@ def _extract_netpol_fields(
     }
 
 
+def _extract_webhook_fields(doc: dict[str, Any]) -> dict[str, Any]:
+    """Detect failurePolicy: Ignore in webhook configurations."""
+    webhooks = doc.get("webhooks") or []
+    failure_policy_ignore = any(
+        isinstance(w, dict) and w.get("failurePolicy") == "Ignore" for w in webhooks
+    )
+    return {"webhook_failure_policy_ignore": failure_policy_ignore}
+
+
+def _extract_psp_fields(doc: dict[str, Any]) -> dict[str, Any]:
+    """Flag existence of PodSecurityPolicy (deprecated resource)."""
+    return {"psp_exists": True}
+
+
+def _extract_pv_fields(doc: dict[str, Any]) -> dict[str, Any]:
+    """Detect PersistentVolume backed by hostPath."""
+    spec = doc.get("spec") or {}
+    has_hostpath = "hostPath" in spec
+    return {"pv_uses_hostpath": has_hostpath}
+
+
 _INFRA_FIELD_TO_KEY = {
     "psa_enforce_missing": "metadata.labels[pod-security.kubernetes.io/enforce]",
     "psa_enforce_privileged": "metadata.labels[pod-security.kubernetes.io/enforce]",
     "secret_plaintext_in_manifest": "data",  # nosec B105
     "netpol_ingress_allow_all": "spec.ingress",
     "netpol_egress_allow_all": "spec.egress",
+    "webhook_failure_policy_ignore": "webhooks[].failurePolicy",
+    "psp_exists": "kind: PodSecurityPolicy",
+    "pv_uses_hostpath": "spec.hostPath",
 }
 
 
@@ -895,6 +956,35 @@ def _extract_k3s_rke2_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _check_k3s_token_permissions(rootfs: str) -> dict[str, Any]:
+    """Check if K3s token file has overly permissive permissions."""
+    token_path = os.path.join(rootfs, "var/lib/rancher/k3s/server/token")
+    if not os.path.isfile(token_path):
+        return {"k3s_token_world_readable": False}
+    try:
+        mode = os.stat(token_path).st_mode
+        world_readable = bool(mode & 0o044)  # group or other readable
+        return {"k3s_token_world_readable": world_readable}
+    except OSError:
+        return {"k3s_token_world_readable": False}
+
+
+def _check_k3s_registries_secrets(rootfs: str) -> dict[str, Any]:
+    """Check if K3s registries.yaml contains embedded secrets."""
+    reg_path = os.path.join(rootfs, "etc/rancher/k3s/registries.yaml")
+    if not os.path.isfile(reg_path):
+        return {"k3s_registry_has_secrets": False}
+    try:
+        with open(reg_path, encoding="utf-8") as fh:
+            content = fh.read()
+        has_secrets = bool(
+            re.search(r"(password|auth|token)\s*:", content, re.IGNORECASE)
+        )
+        return {"k3s_registry_has_secrets": has_secrets}
+    except OSError:
+        return {"k3s_registry_has_secrets": False}
+
+
 _NODE_FIELD_TO_KEY = {
     "anonymous_auth_enabled": "authentication.anonymous.enabled",
     "readonly_port_enabled": "readOnlyPort",
@@ -905,6 +995,8 @@ _NODE_FIELD_TO_KEY = {
     "tls_cert_missing": "tlsCertFile / rotateCertificates",
     "systemd_service_found": "systemd.service",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
+    "k3s_token_world_readable": "/var/lib/rancher/k3s/server/token",  # nosec B105
+    "k3s_registry_has_secrets": "/etc/rancher/k3s/registries.yaml",
 }
 
 
@@ -945,6 +1037,8 @@ def _extract_apiserver_fields(args: dict[str, str]) -> dict[str, Any]:
         ),
         "apiserver_encryption_missing": not args.get("encryption-provider-config"),
         "apiserver_admission_missing": not args.get("enable-admission-plugins"),
+        "apiserver_audit_log_missing": not args.get("audit-log-path"),
+        "apiserver_audit_policy_missing": not args.get("audit-policy-file"),
     }
 
 
@@ -978,6 +1072,8 @@ _APISERVER_FIELD_TO_KEY = {
     "apiserver_authz_not_rbac": "--authorization-mode",
     "apiserver_encryption_missing": "--encryption-provider-config",
     "apiserver_admission_missing": "--enable-admission-plugins",
+    "apiserver_audit_log_missing": "--audit-log-path",
+    "apiserver_audit_policy_missing": "--audit-policy-file",
 }
 
 _ETCD_FIELD_TO_KEY = {
@@ -1230,6 +1326,10 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     data = _extract_secret_fields(doc)
                 elif kind == "NetworkPolicy":
                     data = _extract_netpol_fields(doc)
+                elif kind == "PersistentVolume":
+                    data = _extract_pv_fields(doc)
+                elif kind == "PodSecurityPolicy":
+                    data = _extract_psp_fields(doc)
                 else:
                     continue
 
@@ -1247,6 +1347,38 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     return lines
 
                 vios = process_violations(vios_raw, fpath, mount_path, _resolve_infra)
+                status = "violated" if vios else "clean"
+                if any(v["type"] == "alert" for v in vios):
+                    alert_count += 1
+                elif any(v["type"] == "warning" for v in vios):
+                    warn_count += 1
+                results_map[key] = {
+                    "kind": kind,
+                    "resource": resource_name,
+                    "container": "",
+                    "violations": vios,
+                    "status": status,
+                    "managed": True,
+                }
+
+            # --- Webhook configurations ---
+            elif kind in _WEBHOOK_KINDS and infra_rules:
+                key = f"{kind}/{resource_name}"
+                data = _extract_webhook_fields(doc)
+                vios_raw = evaluate_rules(data, infra_rules)
+
+                def _resolve_webhook(_v, used_fields, _d=data):
+                    lines = []
+                    for f in used_fields:
+                        mk = _INFRA_FIELD_TO_KEY.get(f, f)
+                        val = _d.get(f)
+                        if val is not None:
+                            lines.append(f"{mk} = {val}")
+                        else:
+                            lines.append(f"<missing> {mk}")
+                    return lines
+
+                vios = process_violations(vios_raw, fpath, mount_path, _resolve_webhook)
                 status = "violated" if vios else "clean"
                 if any(v["type"] == "alert" for v in vios):
                     alert_count += 1
@@ -1279,6 +1411,11 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
                 "cap_bounding_set"
             )
+
+            # K3s-specific checks
+            if distro in ("k3s", "rke2"):
+                data.update(_check_k3s_token_permissions(mount_path))
+                data.update(_check_k3s_registries_secrets(mount_path))
 
             key = f"NodeConfig/{distro}"
             vios_raw = evaluate_rules(data, node_rules)

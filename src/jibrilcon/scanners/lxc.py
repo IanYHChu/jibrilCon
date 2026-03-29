@@ -97,6 +97,8 @@ _FIELD_TO_CONFIG_KEY = {
     "rootfs_not_readonly": "lxc.rootfs.options",
     "systemd_service_found": "systemd.service",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
+    "nested_lxc_detected": "lxc.rootfs.path (contains lxc-start)",
+    "has_dangerous_mount_options": "lxc.mount.entry (options)",
 }
 
 # ---------------------------------------------------------------------
@@ -490,11 +492,60 @@ def _extract_rootfs_readonly(entries: dict[str, list[str]]) -> dict[str, bool]:
     return {"rootfs_not_readonly": not is_ro}
 
 
-def _parse_mount_entry(entry: str) -> dict[str, str]:
+def _extract_fstab_entries(entries: dict[str, list[str]], rootfs: str) -> list[str]:
+    """Read lxc.mount.fstab referenced file and return mount lines."""
+    vals = entries.get("lxc.mount.fstab", [])
+    if not vals:
+        return []
+    fstab_path = vals[-1].strip()
+    if not fstab_path:
+        return []
+    try:
+        abs_path = safe_join(rootfs, fstab_path.lstrip("/"))
+    except ValueError:
+        return []
+    if not abs_path.is_file():
+        return []
+    try:
+        text = abs_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    mount_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            mount_lines.append(stripped)
+    return mount_lines
+
+
+def _extract_nested_lxc(entries: dict[str, list[str]], rootfs: str) -> dict[str, bool]:
+    """Detect LXC installation inside container (nested LXC)."""
+    rootfs_path_val = entries.get("lxc.rootfs.path", [""])[-1].strip()
+    if not rootfs_path_val:
+        return {"nested_lxc_detected": False}
+    try:
+        container_rootfs = safe_join(rootfs, rootfs_path_val.lstrip("/"))
+    except ValueError:
+        return {"nested_lxc_detected": False}
+    lxc_binaries = ["usr/bin/lxc-start", "usr/sbin/lxc-start", "usr/bin/lxc-create"]
+    for binary in lxc_binaries:
+        try:
+            check = safe_join(str(container_rootfs), binary)
+            if check.is_file():
+                return {"nested_lxc_detected": True}
+        except (ValueError, OSError):
+            continue
+    return {"nested_lxc_detected": False}
+
+
+_DANGEROUS_MOUNT_OPTS = frozenset({"rbind", "loop", "remount"})
+
+
+def _parse_mount_entry(entry: str) -> dict[str, str | bool]:
     """
     Given a single ``lxc.mount.entry`` line, return mapping:
 
-        {"source": str, "options": str}
+        {"source": str, "options": str, "has_dangerous_mount_options": bool}
 
     lxc.mount.entry format (fstab-style):
         <source> <dest> <type> <options> [<dump> <pass>]
@@ -503,7 +554,14 @@ def _parse_mount_entry(entry: str) -> dict[str, str]:
     source = parts[0] if parts else ""
     # options are at index 3 (fstab field 4)
     options = parts[3] if len(parts) >= 4 else ""
-    return {"source": source, "options": options}
+    has_dangerous_mount_options = (
+        bool(set(options.split(",")) & _DANGEROUS_MOUNT_OPTS) if options else False
+    )
+    return {
+        "source": source,
+        "options": options,
+        "has_dangerous_mount_options": has_dangerous_mount_options,
+    }
 
 
 # ---------------------------------------------------------------------
@@ -517,6 +575,7 @@ _MOUNT_ENTRY_RULE_IDS = frozenset(
         "mount_run_dangerous",
         "mount_usr_should_be_ro",
         "mount_dev_should_be_ro",
+        "mount_dangerous_options",
     }
 )
 
@@ -568,6 +627,7 @@ def _analyze_lxc_container(
     cgroup_dev_info = _extract_cgroup_devices(entries)
     resource_info = _extract_resource_limits(entries)
     rootfs_ro_info = _extract_rootfs_readonly(entries)
+    nested_lxc_info = _extract_nested_lxc(entries, mount_path)
 
     # infer runs_as_root from context or missing mappings
     systemd_root = context.is_systemd_started(
@@ -601,6 +661,7 @@ def _analyze_lxc_container(
         **cgroup_dev_info,
         **resource_info,
         **rootfs_ro_info,
+        **nested_lxc_info,
         "runs_as_root": runs_as_root,
         "systemd_service_found": systemd_service_found,
         "systemd_caps_unrestricted": systemd_caps_unrestricted,
@@ -629,15 +690,23 @@ def _analyze_lxc_container(
 
     # ------------------ mount rules -------------------
     mount_results: list[dict[str, object]] = []
-    for line in entries.get("lxc.mount.entry", []):
-        if not isinstance(line, str):
-            continue
+
+    # Collect mount lines from lxc.mount.entry
+    all_mount_lines: list[str] = [
+        line for line in entries.get("lxc.mount.entry", []) if isinstance(line, str)
+    ]
+
+    # Also collect mount lines from lxc.mount.fstab referenced file
+    fstab_lines = _extract_fstab_entries(entries, mount_path)
+    all_mount_lines.extend(fstab_lines)
+
+    for line in all_mount_lines:
         mentry = _parse_mount_entry(line)
         vios_raw = evaluate_rules(mentry, mount_rules)
 
         def _resolve_mount_lines(_v, used_fields, _line=line):
             lines = [_line] if _line else []
-            for f in used_fields - {"source", "options"}:
+            for f in used_fields - {"source", "options", "has_dangerous_mount_options"}:
                 lines.append(f"<missing> {f}")
             return lines
 

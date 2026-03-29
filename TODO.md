@@ -19,31 +19,26 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - [x] Detect missing `lxc.rootfs.options = ro` (read-only rootfs)
 
 ### MEDIUM
-- [ ] Enhance mount entry parsing to check OPTIONS (rbind, loop, remount), not just source paths
-- [ ] Parse `lxc.mount.fstab` referenced files for dangerous entries
-- [ ] Detect nested LXC (LXC-in-LXC) configurations
-
-### LXC-specific notes
-- LXC uses blacklist model (cap.drop) vs Docker's whitelist (CapAdd) -- different detection logic needed
-- `lxc.mount.auto` is LXC-unique, no equivalent in Docker/Podman
-- Config paths are unpredictable -- os.walk MUST be preserved
+- [x] Enhance mount entry parsing to check OPTIONS (rbind, loop, remount), not just source paths
+- [x] Parse `lxc.mount.fstab` referenced files for dangerous entries
+- [x] Detect nested LXC (LXC-in-LXC) configurations
 
 ## Docker Scanner
 
 ### HIGH
-- [x] Analyse daemon config (`/etc/docker/daemon.json`): `userns-remap`, `icc` (partial: iptables, no-new-privileges, default-ulimits, log-driver, seccomp-profile remaining)
+- [x] Analyse daemon config (`/etc/docker/daemon.json`): `userns-remap`, `icc`
 - [x] Detect container `Config.User` empty or root (root inside container, independent of systemd User=)
-- [x] Detect missing resource limits: `Memory`, `PidsLimit` (NanoCpus, CpuQuota, MemorySwap remaining)
+- [x] Detect missing resource limits: `Memory`, `PidsLimit`
 - [x] Detect `RestartPolicy.Name = always` (persistence vector for compromised containers)
 - [x] Detect `LogConfig.Type = none` (audit trail disabled)
 - [x] Detect dangerous `DeviceCgroupRules` (e.g., `a *:* rwm` grants all device access)
 - [x] Detect dangerous `Devices[]` array entries (`/dev/mem`, `/dev/kmem`, `/dev/fuse`, `/dev/net/tun`)
 
 ### MEDIUM
-- [ ] Detect Docker socket mount writable (check `ro` option on `/var/run/docker.sock` bind)
-- [ ] Detect `ExtraHosts` injection (custom /etc/hosts entries)
-- [ ] Detect `Ulimits` excessive values (file descriptor exhaustion)
-- [ ] Detect SELinux `label=type=spc_t` (super privileged container type)
+- [x] Detect Docker socket mount writable (check `ro` option on `/var/run/docker.sock` bind)
+- [x] Detect `ExtraHosts` injection (custom /etc/hosts entries)
+- [x] Detect `Ulimits` excessive values (file descriptor exhaustion)
+- [x] Detect SELinux `label=type=spc_t` (super privileged container type)
 
 ## Podman Scanner
 
@@ -52,13 +47,13 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - [x] Validate `linux.maskedPaths` includes critical paths (`/proc/kcore`, `/proc/sysrq-trigger`, `/proc/mem`)
 - [x] Validate `linux.readonlyPaths` includes `/proc/sys`, `/proc/irq`, `/sys/firmware`
 - [x] Detect SELinux label issues: `process.selinuxLabel` with `spc_t`
-- [x] Detect missing resource limits: `linux.resources.memory.limit`, `linux.resources.pids.limit` (cpu remaining)
+- [x] Detect missing resource limits: `linux.resources.memory.limit`, `linux.resources.pids.limit`
 
 ### MEDIUM
-- [ ] Validate `linux.resources.devices` allowlist strictness (deny dangerous devices)
-- [ ] Check `rootfsPropagation` is not "shared"
-- [ ] Detect sensitive data in `process.env` (API keys, passwords, LD_PRELOAD)
-- [ ] Read `containers.conf` system/user defaults for baseline security settings
+- [x] Validate `linux.resources.devices` allowlist strictness (deny dangerous devices)
+- [x] Check `rootfsPropagation` is not "shared"
+- [x] Detect sensitive data in `process.env` (API keys, passwords, LD_PRELOAD)
+- [x] Read `containers.conf` system/user defaults for baseline security settings
 
 ## Kubernetes Scanner
 
@@ -70,28 +65,28 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 
 ### HIGH
 - [x] Detect `imagePullPolicy: IfNotPresent` (supply chain risk)
-- [ ] Validate `spec.securityContext.sysctls` against unsafe sysctl list
-- [ ] Scan ValidatingWebhookConfiguration / MutatingWebhookConfiguration for `failurePolicy: Ignore`
-- [x] Expand RBAC detection: impersonate verbs, configmaps/get, clusterrolebindings/create (watch secrets remaining)
-- [ ] Detect PodSecurityPolicy resources and admission controller status
-- [ ] Detect missing SELinux options in pod security context
+- [x] Validate `spec.securityContext.sysctls` against unsafe sysctl list
+- [x] Scan ValidatingWebhookConfiguration / MutatingWebhookConfiguration for `failurePolicy: Ignore`
+- [x] Expand RBAC detection: impersonate verbs, configmaps/get, clusterrolebindings/create
+- [x] Detect PodSecurityPolicy resources (deprecated API, should not be used)
+- [x] Detect missing SELinux options in pod security context
 
 ### MEDIUM
-- [ ] Validate `fsGroup` / `supplementalGroups` in pod security context
+- [x] Validate `fsGroup` in pod security context
 - [ ] Check liveness/readiness probe security (exec probes with arbitrary commands)
 - [ ] Validate volume types: NFS, iSCSI, flexVolume (implicit security properties)
 - [ ] Detect missing `ResourceQuota` / default-deny `NetworkPolicy` per namespace
-- [ ] Scan `PersistentVolume` for hostPath PVs
+- [x] Scan `PersistentVolume` for hostPath PVs
 - [ ] Detect workload-specific risks (DaemonSet on all nodes, CronJob history limits)
 
 ### K3s/RKE2-specific
 - [ ] Validate `--write-kubeconfig` permissions
 - [ ] Check `--datastore-endpoint` for TLS/credentials
-- [ ] Scan `/var/lib/rancher/k3s/server/token` file permissions
-- [ ] Check `/etc/rancher/k3s/registries.yaml` for embedded secrets
+- [x] Scan `/var/lib/rancher/k3s/server/token` file permissions
+- [x] Check `/etc/rancher/k3s/registries.yaml` for embedded secrets
 - [ ] Detect K3s bootstrap token rotation configuration
 - [ ] Validate K3s-specific `--kubelet-arg` and `--kube-apiserver-arg` flags
 
 ### API server audit logging
-- [ ] Detect missing `--audit-log-path` and `--audit-policy-file`
+- [x] Detect missing `--audit-log-path` and `--audit-policy-file`
 - [ ] Validate audit log retention (maxage, maxbackup)

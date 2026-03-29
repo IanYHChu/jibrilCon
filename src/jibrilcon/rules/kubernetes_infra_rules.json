@@ -104,6 +104,69 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "webhook_failure_policy_ignore",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "Webhook configuration uses failurePolicy: Ignore",
+      "risk": "When failurePolicy is set to Ignore, the admission webhook is bypassed if it fails or is unreachable. An attacker can take the webhook offline (e.g., by deleting its service) to bypass admission controls and deploy malicious workloads.",
+      "remediation": "Set failurePolicy to Fail on all validating and mutating webhook configurations. Ensure the webhook backend is highly available.",
+      "references": {
+        "mitre_attack": ["T1562"],
+        "cis_kubernetes_benchmark": ["5.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "webhook_failure_policy_ignore",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "psp_exists",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "PodSecurityPolicy resource detected (deprecated API)",
+      "risk": "PodSecurityPolicy was deprecated in Kubernetes 1.21 and removed in 1.25. Relying on PSP means the cluster uses an unsupported admission mechanism that will stop working after upgrade, leaving pods unprotected.",
+      "remediation": "Migrate from PodSecurityPolicy to Pod Security Admission (PSA) labels or a policy engine such as OPA Gatekeeper or Kyverno.",
+      "references": {
+        "mitre_attack": ["T1610"],
+        "cis_kubernetes_benchmark": ["5.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "psp_exists",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "pv_uses_hostpath",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "PersistentVolume is backed by hostPath",
+      "risk": "A PersistentVolume with hostPath exposes a node directory to any pod that claims it. Unlike pod-level hostPath mounts, PVs can be claimed dynamically by any namespace, making it harder to audit which workloads access the host filesystem.",
+      "remediation": "Use a proper storage driver (CSI, NFS, cloud block storage) instead of hostPath for PersistentVolumes.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_kubernetes_benchmark": ["5.2.12"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "pv_uses_hostpath",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

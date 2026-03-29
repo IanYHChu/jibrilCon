@@ -482,6 +482,68 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "unsafe_sysctls",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Pod uses unsafe sysctls (kernel.*, vm.*, net.ipv4.ip_forward)",
+      "risk": "Unsafe sysctls modify kernel parameters that affect the entire node, not just the pod namespace. An attacker can disable ASLR, enable IP forwarding for man-in-the-middle attacks, or manipulate kernel memory management.",
+      "remediation": "Remove unsafe sysctls from spec.securityContext.sysctls. Only use safe sysctls (net.ipv4.ping_group_range, net.ipv4.ip_local_port_range, etc.).",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_kubernetes_benchmark": ["5.2.6"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_unsafe_sysctls",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "selinux_not_set",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "SELinux options are not set in pod or container security context",
+      "risk": "Without SELinux options, the container runs with the default SELinux context which may grant broader access to host filesystem labels than necessary. On SELinux-enforcing nodes, explicit context assignment strengthens mandatory access control.",
+      "remediation": "Set securityContext.seLinuxOptions with an appropriate SELinux type (e.g., container_t) on the pod or container.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_kubernetes_benchmark": ["5.7.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "selinux_not_set",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "fsgroup_missing",
+      "type": "warning",
+      "severity": 3.0,
+      "description": "Pod security context does not set fsGroup",
+      "risk": "Without fsGroup, volumes mounted into the pod retain their original group ownership. Containers running as non-root may not be able to read or write shared volumes, leading to permission errors or requiring the container to run as root.",
+      "remediation": "Set spec.securityContext.fsGroup to a non-zero GID that matches the container user's supplemental groups.",
+      "references": {
+        "cis_kubernetes_benchmark": ["5.2.6"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "fsgroup_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

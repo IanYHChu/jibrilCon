@@ -272,6 +272,48 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "apiserver_audit_log_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "kube-apiserver audit logging path is not configured",
+      "risk": "Without --audit-log-path, the API server does not write audit logs to disk. Security-relevant events such as secret access, RBAC changes, and pod creation are not recorded, hindering incident response and forensics.",
+      "remediation": "Set --audit-log-path to a persistent file path (e.g., /var/log/kubernetes/audit.log) and configure --audit-log-maxage, --audit-log-maxsize, --audit-log-maxbackup.",
+      "references": {
+        "mitre_attack": ["T1562.008"],
+        "cis_kubernetes_benchmark": ["1.2.18"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_audit_log_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apiserver_audit_policy_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "kube-apiserver audit policy file is not configured",
+      "risk": "Without --audit-policy-file, the API server has no audit policy and will not generate audit events even if --audit-log-path is set. No audit trail means compromises go undetected.",
+      "remediation": "Create an audit policy file and set --audit-policy-file on the kube-apiserver command line. At minimum, log Metadata level for all resources.",
+      "references": {
+        "mitre_attack": ["T1562.008"],
+        "cis_kubernetes_benchmark": ["1.2.18"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_audit_policy_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

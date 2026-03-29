@@ -476,6 +476,50 @@
           "severity": 3.0
         }
       ]
+    },
+    {
+      "id": "dangerous_devices_allowed",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "Container has access to dangerous host devices (/dev/mem, /dev/kmem, /dev/fuse, etc.)",
+      "risk": "Direct access to /dev/mem enables reading host kernel memory; /dev/fuse allows arbitrary filesystem mounting. These are direct container escape vectors.",
+      "remediation": "Remove dangerous device entries from linux.devices. Use only specific, non-privileged devices.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "dangerous_devices_allowed", "operator": "equals", "value": true}]
+    },
+    {
+      "id": "rootfs_propagation_shared",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Root filesystem propagation is set to shared or rshared",
+      "risk": "Shared rootfs propagation allows mounts created inside the container to propagate to the host. An attacker can mount filesystems visible to the host, enabling escape.",
+      "remediation": "Set linux.rootfsPropagation to 'rprivate' or 'rslave'.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "rootfs_propagation_shared", "operator": "equals", "value": true}]
+    },
+    {
+      "id": "sensitive_env_detected",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Environment variables contain potential secrets or dangerous library preloads",
+      "risk": "Secrets in environment variables are visible in /proc/[pid]/environ on the host. LD_PRELOAD enables arbitrary code injection.",
+      "remediation": "Use secret management (Kubernetes secrets, vault) instead of environment variables. Remove LD_PRELOAD/LD_LIBRARY_PATH unless required.",
+      "references": {"mitre_attack": ["T1552.001"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "sensitive_env_detected", "operator": "equals", "value": true}]
+    },
+    {
+      "id": "containers_conf_no_seccomp",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "System containers.conf does not specify a default seccomp profile",
+      "risk": "Without a default seccomp profile in containers.conf, newly created containers may lack syscall filtering unless explicitly configured.",
+      "remediation": "Set seccomp_profile in [containers] section of /etc/containers/containers.conf.",
+      "references": {"mitre_attack": ["T1611"], "nist_800_190": ["4.4"]},
+      "logic": "and",
+      "conditions": [{"field": "containers_conf_no_seccomp", "operator": "equals", "value": true}]
     }
   ]
 }

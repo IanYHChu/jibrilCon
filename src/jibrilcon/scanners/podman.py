@@ -100,6 +100,16 @@ _DANGEROUS_BIND_PATHS = frozenset(
     }
 )
 
+_DANGEROUS_DEVICE_PATHS = frozenset(
+    {"/dev/mem", "/dev/kmem", "/dev/port", "/dev/sda", "/dev/fuse"}
+)
+
+_SENSITIVE_ENV_RE = re.compile(
+    r"(PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|AWS_ACCESS|AWS_SECRET"
+    r"|LD_PRELOAD|LD_LIBRARY_PATH)=",
+    re.IGNORECASE,
+)
+
 # Map rule field names to JSON keys (used by report writer if needed)
 _FIELD_TO_CONFIG_KEY = {
     "process.user.uid": "process.user.uid",
@@ -125,6 +135,10 @@ _FIELD_TO_CONFIG_KEY = {
     "systemd_service_found": "systemd.service",
     "systemd_user": "systemd.User",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
+    "dangerous_devices_allowed": "linux.devices",
+    "rootfs_propagation_shared": "linux.rootfsPropagation",
+    "sensitive_env_detected": "process.env",
+    "containers_conf_no_seccomp": "containers.conf.seccomp_profile",
 }
 
 # ---------------------------------------------------------------------
@@ -197,6 +211,24 @@ def _discover_configs(rootfs: str) -> list[tuple[str, str, str]]:
             if os.path.exists(cfg_path):
                 discovered.append((name, cfg_path, mode))
     return discovered
+
+
+def _extract_containers_conf_defaults(rootfs: str) -> dict[str, Any]:
+    """Check system-level containers.conf for weak defaults."""
+    conf_path = os.path.join(rootfs, "etc/containers/containers.conf")
+    if not os.path.exists(conf_path):
+        return {"containers_conf_missing": True, "containers_conf_no_seccomp": False}
+    try:
+        with open(conf_path, "rb") as fh:
+            data = toml.load(fh)
+    except (OSError, ValueError, KeyError):
+        return {"containers_conf_missing": False, "containers_conf_no_seccomp": False}
+    containers_section = data.get("containers", {})
+    seccomp_profile = containers_section.get("seccomp_profile", "")
+    return {
+        "containers_conf_missing": False,
+        "containers_conf_no_seccomp": not seccomp_profile,
+    }
 
 
 def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -319,6 +351,27 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     selinux_label = cfg.get("process", {}).get("selinuxLabel", "")
     selinux_privileged = isinstance(selinux_label, str) and "spc_t" in selinux_label
 
+    # Device allowlist -- check if dangerous host devices are exposed
+    devices = cfg.get("linux", {}).get("devices", [])
+    if not isinstance(devices, list):
+        devices = []
+    dangerous_devices_allowed = any(
+        isinstance(d, dict) and d.get("path", "") in _DANGEROUS_DEVICE_PATHS
+        for d in devices
+    )
+
+    # rootfsPropagation -- shared/rshared allows mount escape
+    rootfs_propagation = cfg.get("linux", {}).get("rootfsPropagation", "")
+    rootfs_propagation_shared = rootfs_propagation in ("shared", "rshared")
+
+    # Sensitive environment variables (secrets, preloads)
+    process_env = cfg.get("process", {}).get("env", [])
+    if not isinstance(process_env, list):
+        process_env = []
+    sensitive_env_detected = any(
+        isinstance(e, str) and _SENSITIVE_ENV_RE.search(e) for e in process_env
+    )
+
     return {
         "process.user.uid": uid,
         "has_cap_sys_admin": has_cap_sys_admin,
@@ -338,6 +391,9 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
         "critical_masks_missing": critical_masks_missing,
         "critical_readonly_missing": critical_readonly_missing,
         "selinux_privileged": selinux_privileged,
+        "dangerous_devices_allowed": dangerous_devices_allowed,
+        "rootfs_propagation_shared": rootfs_propagation_shared,
+        "sensitive_env_detected": sensitive_env_detected,
     }
 
 
@@ -348,6 +404,7 @@ def _analyze_container(
     context: ScanContext,
     rules: list[dict[str, Any]],
     mount_path: str,
+    conf_defaults: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Load config, apply overrides, evaluate rules. Return (data, vios).
 
@@ -415,6 +472,8 @@ def _analyze_container(
 
     data = _extract_fields(cfg_json)
     data["runtime_mode"] = runtime_mode
+    if conf_defaults:
+        data.update(conf_defaults)
 
     # merge systemd inference: flag if service lacks non-root User=
     data["service_user_missing"] = context.is_user_missing(name)
@@ -510,6 +569,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
+    # Extract system-level containers.conf defaults (once, shared)
+    conf_defaults = _extract_containers_conf_defaults(mount_path)
+
     # Build lookup of all containers found on disk
     disk_configs = _discover_configs(mount_path)
     disk_lookup: dict[str, tuple[str, str]] = {}
@@ -542,7 +604,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
 
         cfg_path, runtime_mode = disk_lookup[name]
         data, vios = _analyze_container(
-            name, cfg_path, runtime_mode, context, rules, mount_path
+            name,
+            cfg_path,
+            runtime_mode,
+            context,
+            rules,
+            mount_path,
+            conf_defaults=conf_defaults,
         )
         if not data and not vios:
             # _analyze_container returned empty due to read error
@@ -569,7 +637,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             continue  # already handled in Phase 1
 
         data, vios = _analyze_container(
-            name, cfg_path, runtime_mode, context, rules, mount_path
+            name,
+            cfg_path,
+            runtime_mode,
+            context,
+            rules,
+            mount_path,
+            conf_defaults=conf_defaults,
         )
         if not data and not vios:
             continue

@@ -1102,6 +1102,168 @@ class TestDockerScanner:
             v["id"] for v in result["results"][0]["violations"]
         ]
 
+    def test_socket_mount_writable_detected(self, make_rootfs):
+        """Writable docker.sock bind mount should trigger alert."""
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "smw" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/sockrw",
+                "Config": {"User": "app", "Image": "app:v1"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/var/run/docker.sock:/var/run/docker.sock"],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "sockrw")
+        ctx.set_service_meta(
+            "docker",
+            "sockrw",
+            {
+                "user": "u",
+                "unit": "d.service",
+                "path": "etc/systemd/system/d.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "socket_mount_writable" in vio_ids
+
+    def test_extra_hosts_present_detected(self, make_rootfs):
+        """Container with ExtraHosts entries should trigger info."""
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "exh" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/extrahosts",
+                "Config": {"User": "app", "Image": "app:v1"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/data:/data:ro"],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
+                "ExtraHosts": ["myhost:10.0.0.1"],
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "extrahosts")
+        ctx.set_service_meta(
+            "docker",
+            "extrahosts",
+            {
+                "user": "u",
+                "unit": "d.service",
+                "path": "etc/systemd/system/d.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "extra_hosts_present" in vio_ids
+
+    def test_ulimits_excessive_detected(self, make_rootfs):
+        """Container with nofile ulimit >1M should trigger warning."""
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "ulm" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/highulimit",
+                "Config": {"User": "app", "Image": "app:v1"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/data:/data:ro"],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
+                "Ulimits": [{"Name": "nofile", "Soft": 2097152, "Hard": 2097152}],
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "highulimit")
+        ctx.set_service_meta(
+            "docker",
+            "highulimit",
+            {
+                "user": "u",
+                "unit": "d.service",
+                "path": "etc/systemd/system/d.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "ulimits_excessive" in vio_ids
+
+    def test_selinux_privileged_detected(self, make_rootfs):
+        """Container with spc_t SELinux label should trigger alert."""
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "sel" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/spct",
+                "Config": {"User": "app", "Image": "app:v1"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": ["/data:/data:ro"],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges", "label=type:spc_t"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "spct")
+        ctx.set_service_meta(
+            "docker",
+            "spct",
+            {
+                "user": "u",
+                "unit": "d.service",
+                "path": "etc/systemd/system/d.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "selinux_privileged" in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # Podman scanner
@@ -2189,6 +2351,244 @@ class TestPodmanScanner:
             v["id"] for v in result["results"][0]["violations"]
         ]
 
+    def test_dangerous_devices_allowed(self, make_rootfs):
+        """Container with /dev/mem in linux.devices triggers alert."""
+        r = make_rootfs
+        cid = "ddv" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "devmem_pod",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
+                    "devices": [
+                        {"path": "/dev/null", "type": "c", "major": 1, "minor": 3},
+                        {"path": "/dev/mem", "type": "c", "major": 1, "minor": 1},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "devmem_pod")
+        ctx.set_service_meta(
+            "podman",
+            "devmem_pod",
+            {
+                "user": "u",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_devices_allowed" in vio_ids
+
+    def test_rootfs_propagation_shared(self, make_rootfs):
+        """rootfsPropagation=shared triggers alert."""
+        r = make_rootfs
+        cid = "rfp" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "shared_prop_pod",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
+                    "rootfsPropagation": "shared",
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "shared_prop_pod")
+        ctx.set_service_meta(
+            "podman",
+            "shared_prop_pod",
+            {
+                "user": "u",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "rootfs_propagation_shared" in vio_ids
+
+    def test_sensitive_env_detected(self, make_rootfs):
+        """Environment variables with secrets trigger warning."""
+        r = make_rootfs
+        cid = "env" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "secret_env_pod",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                    "env": [
+                        "PATH=/usr/bin",
+                        "DB_PASSWORD=hunter2",
+                        "HOME=/app",
+                    ],
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "secret_env_pod")
+        ctx.set_service_meta(
+            "podman",
+            "secret_env_pod",
+            {
+                "user": "u",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "sensitive_env_detected" in vio_ids
+
+    def test_containers_conf_no_seccomp(self, make_rootfs):
+        """containers.conf without seccomp_profile triggers warning."""
+        r = make_rootfs
+        cid = "ccf" * 8 + "f" * 40
+        # Write a containers.conf with no seccomp_profile
+        conf_path = Path(r.path) / "etc" / "containers" / "containers.conf"
+        conf_path.parent.mkdir(parents=True, exist_ok=True)
+        conf_path.write_text("[containers]\ndefault_ulimits = []\n")
+        r.add_podman_container(
+            cid,
+            "no_seccomp_conf_pod",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "no_seccomp_conf_pod")
+        ctx.set_service_meta(
+            "podman",
+            "no_seccomp_conf_pod",
+            {
+                "user": "u",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "containers_conf_no_seccomp" in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # LXC scanner
@@ -3262,6 +3662,127 @@ class TestLxcScanner:
         assert ghost[0]["managed"] is True
         vio_ids = [v["id"] for v in ghost[0]["violations"]]
         assert "systemd_service_broken" in vio_ids
+
+    def test_mount_dangerous_options_rbind(self, make_rootfs):
+        """Mount entry with rbind should trigger mount_dangerous_options."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/rbindmnt/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.mount.entry = /data data none rbind 0 0\n"
+        )
+        r.add_lxc_config("rbindmnt", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "rbindmnt",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-rbindmnt.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "rbindmnt")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_dangerous_options" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "mount_dangerous_options"
+        ][0]
+        assert vio["type"] == "warning"
+        assert vio["severity"] == 6.0
+
+    def test_mount_fstab_dangerous_entry(self, make_rootfs):
+        """Fstab file with /proc mount should trigger mount_proc_dangerous."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/fstabmnt/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+            "lxc.mount.fstab = /etc/lxc/fstabmnt.fstab\n"
+        )
+        r.add_lxc_config("fstabmnt", config)
+        # Create the fstab file referenced by the config
+        fstab_dir = Path(r.path) / "etc" / "lxc"
+        fstab_dir.mkdir(parents=True, exist_ok=True)
+        (fstab_dir / "fstabmnt.fstab").write_text(
+            "# LXC fstab\n/proc proc proc rw 0 0\n",
+            encoding="utf-8",
+        )
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "fstabmnt",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-fstabmnt.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "fstabmnt")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_proc_dangerous" in vio_ids
+
+    def test_nested_lxc_detected(self, make_rootfs):
+        """Container rootfs containing lxc-start binary should trigger nested_lxc_detected."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nested/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("nested", config)
+        # Place lxc-start binary inside the container's rootfs
+        nested_bin = (
+            Path(r.path)
+            / "var"
+            / "lib"
+            / "lxc"
+            / "nested"
+            / "rootfs"
+            / "usr"
+            / "bin"
+            / "lxc-start"
+        )
+        nested_bin.parent.mkdir(parents=True, exist_ok=True)
+        nested_bin.write_bytes(b"\x7fELF")
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nested",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nested.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "nested")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "nested_lxc_detected" in vio_ids
+        vio = [
+            v
+            for v in result["results"][0]["violations"]
+            if v["id"] == "nested_lxc_detected"
+        ][0]
+        assert vio["type"] == "warning"
+        assert vio["severity"] == 6.0
 
 
 # ------------------------------------------------------------------ #

@@ -186,6 +186,47 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "k3s_token_world_readable",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "K3s server token file is readable by group or other users",
+      "risk": "The K3s token file (/var/lib/rancher/k3s/server/token) contains the cluster bootstrap secret. If readable by non-root users, any local user can join new nodes to the cluster or authenticate as a cluster member.",
+      "remediation": "Set permissions on /var/lib/rancher/k3s/server/token to 0600 (owner-only read/write). Ensure the file is owned by root:root.",
+      "references": {
+        "mitre_attack": ["T1552.001"],
+        "cis_kubernetes_benchmark": ["4.1.7"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "k3s_token_world_readable",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "k3s_registry_has_secrets",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "K3s registries.yaml contains embedded credentials",
+      "risk": "The registries.yaml file contains plaintext passwords, tokens, or auth strings for container registries. Any user with read access to this file can pull or push images using these credentials.",
+      "remediation": "Use credential helpers or mounted secrets instead of embedding credentials in registries.yaml. If credentials must be in the file, restrict permissions to 0600 root:root.",
+      "references": {
+        "mitre_attack": ["T1552.001"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "k3s_registry_has_secrets",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }
