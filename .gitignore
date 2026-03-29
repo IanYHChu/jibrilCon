@@ -41,6 +41,9 @@ coverage.xml
 .claude/
 CLAUDE.md
 
+# Serena local state
+.serena/
+
 # Utility scripts (not required by the package)
 /scripts/
 
