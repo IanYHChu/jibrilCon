@@ -137,7 +137,7 @@ def _file_contains_rootfs(
         line = raw.strip()
         if line.startswith("lxc.rootfs.path"):
             return True
-        if line.startswith("lxc.include"):
+        if line.startswith("lxc.include") and "=" in line:
             _, inc = line.split("=", 1)
             inc_raw = inc.strip()
             # Resolve include path within rootfs boundary

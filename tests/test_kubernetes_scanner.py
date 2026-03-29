@@ -140,6 +140,57 @@ spec:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "dangerous_capabilities_added" in vio_ids
 
+    def test_dangerous_capabilities_lowercase(self, tmp_path):
+        """Lowercase capability names must be detected as dangerous."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "lower.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lower-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    securityContext:
+      capabilities:
+        add: ["sys_admin"]
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_capabilities_added" in vio_ids
+
+    def test_cap_drop_all_with_cap_prefix(self, tmp_path):
+        """CAP_ALL in drop list must be normalised to ALL."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "drop.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: drop-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    securityContext:
+      capabilities:
+        drop: ["CAP_ALL"]
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "cap_drop_all_missing" not in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # K3s manifests

@@ -318,8 +318,8 @@ def _extract_container_fields(
         cap_add = []
     if not isinstance(cap_drop, list):
         cap_drop = []
-    normalised_add = {str(c).removeprefix("CAP_") for c in cap_add}
-    normalised_drop = {str(c).upper() for c in cap_drop}
+    normalised_add = {str(c).removeprefix("CAP_").upper() for c in cap_add}
+    normalised_drop = {str(c).removeprefix("CAP_").upper() for c in cap_drop}
     dangerous_caps_added = bool(normalised_add & _DANGEROUS_CAPS)
     cap_drop_all_missing = "ALL" not in normalised_drop
 

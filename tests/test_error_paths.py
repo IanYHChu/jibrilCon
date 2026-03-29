@@ -275,3 +275,36 @@ class TestPodmanRulesLoadFailure:
         assert "summary" in result
         assert "results" in result
         assert isinstance(result["results"], list)
+
+
+# ------------------------------------------------------------------ #
+# 8. LXC: lxc.include without = sign must not crash
+# ------------------------------------------------------------------ #
+
+
+class TestLxcIncludeMalformed:
+    def test_lxc_include_without_equals_sign(self, tmp_path):
+        """A malformed 'lxc.include /path' line (no '=') must be skipped,
+        not crash with ValueError."""
+        from jibrilcon.scanners.lxc import _file_contains_rootfs, _is_text_file
+
+        _is_text_file.cache_clear()
+
+        rootfs = tmp_path / "rootfs"
+        rootfs.mkdir()
+        conf_dir = rootfs / "etc" / "lxc"
+        conf_dir.mkdir(parents=True)
+
+        cfg = conf_dir / "test.conf"
+        cfg.write_text(
+            "lxc.include /some/path\n"
+            "lxc.rootfs.path = /var/lib/lxc/test/rootfs\n",
+            encoding="utf-8",
+        )
+
+        # Must not raise ValueError; the malformed include is skipped,
+        # but lxc.rootfs.path is still detected.
+        result = _file_contains_rootfs(cfg, str(rootfs))
+        assert result is True
+
+        _is_text_file.cache_clear()

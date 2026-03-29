@@ -309,3 +309,29 @@ def test_scanner_timeout_handled_gracefully(mock_iter, caplog):
     finally:
         # Unblock the slow scanner thread so it can exit cleanly
         release.set()
+
+
+@patch("jibrilcon.util.scanner_loader._iter_scanner_modules")
+def test_scanner_unexpected_exception_caught(mock_iter, caplog):
+    """Unexpected exception types (e.g. IndexError) are caught by the
+    catch-all handler and do not crash the scan."""
+
+    def good_scan(mount_path, *, context=None):
+        return {"scanner": "good", "findings": []}
+
+    def bad_scan(mount_path, *, context=None):
+        raise IndexError("list index out of range")
+
+    mock_iter.return_value = [
+        _make_scanner_module("jibrilcon.scanners.good", good_scan),
+        _make_scanner_module("jibrilcon.scanners.bad", bad_scan),
+    ]
+
+    results = run_scanners("/fake/rootfs", context=ScanContext())
+
+    assert len(results) == 1
+    assert results[0]["scanner"] == "good"
+
+    unexpected_records = [r for r in caplog.records if "unexpected" in r.message]
+    assert len(unexpected_records) == 1
+    assert "IndexError" in unexpected_records[0].message

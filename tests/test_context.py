@@ -27,6 +27,10 @@ def test_exec_lines_round_trip():
     assert got == lines
     # Must be a copy, not a reference
     assert got is not lines
+    # Mutating the returned list must NOT affect cached data
+    got.append("extra")
+    got2 = ctx.get_exec_lines("docker", "web01")
+    assert got2 == lines
 
 
 def test_exec_lines_missing_returns_empty():

@@ -151,5 +151,11 @@ def run_scanners(
                         name,
                         type(exc).__name__,
                     )
+                except Exception as exc:
+                    logger.exception(
+                        "Scanner %s raised unexpected %s",
+                        name,
+                        type(exc).__name__,
+                    )
 
     return results

@@ -87,7 +87,7 @@ class ScanContext:
         Return cached Exec* command lines for the given container, or [] if absent.
         """
         with self._lock:
-            return self._exec_lines.get((engine, container_name), [])
+            return list(self._exec_lines.get((engine, container_name), []))
 
     # -----------------------------------------------------------------
     # Accessors

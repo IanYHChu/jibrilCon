@@ -115,12 +115,15 @@ def _get_podman_data_root(rootfs: str) -> str:
     if not os.path.exists(cfg_path):
         return "/var/lib/containers/storage"
 
-    with open(cfg_path, encoding="utf-8") as fh:
-        for line in fh:
-            # Match both quoted ("...") and unquoted values
-            m = re.match(r'^\s*graphRoot\s*=\s*(?:"(.*?)"|(\S+))', line)
-            if m:
-                return m.group(1) or m.group(2)
+    try:
+        with open(cfg_path, encoding="utf-8") as fh:
+            for line in fh:
+                # Match both quoted ("...") and unquoted values
+                m = re.match(r'^\s*graphRoot\s*=\s*(?:"(.*?)"|(\S+))', line)
+                if m:
+                    return m.group(1) or m.group(2)
+    except OSError as exc:
+        logger.warning("Cannot read %s: %s", cfg_path, exc)
     return "/var/lib/containers/storage"
 
 
@@ -347,7 +350,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         if isinstance(mod_data, dict):
                             deep_merge(cfg_json, mod_data)
                         else:
-                            logger.warning("TOML module %s is not a dict (got %s), skipping", name_or_path, type(mod_data).__name__)
+                            logger.warning("TOML module %s is not a dict (got %s), skipping", mod_path, type(mod_data).__name__)
                     except (OSError, ValueError, KeyError) as exc:
                         logger.warning(
                             "Skipping malformed module %s: %s", mod_path, exc
