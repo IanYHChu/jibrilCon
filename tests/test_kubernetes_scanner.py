@@ -1879,9 +1879,11 @@ metadata:
         ctx = _make_context()
         result = kubernetes.scan(str(root), context=ctx)
         ns = [r for r in result["results"] if r["kind"] == "Namespace"]
-        assert len(ns) == 1
-        assert ns[0]["status"] == "clean"
-        assert ns[0]["managed"] is True
+        # 2 results: the Namespace PSA check (clean) + isolation check
+        assert len(ns) == 2
+        psa_result = [r for r in ns if r["status"] == "clean"]
+        assert len(psa_result) == 1
+        assert psa_result[0]["managed"] is True
 
 
 class TestSecretPlaintext:
@@ -2047,14 +2049,24 @@ spec:
         )
         ctx = _make_context()
         result = kubernetes.scan(str(root), context=ctx)
-        # Should scan 3 resources: Namespace, Role, Pod container
-        assert result["summary"]["kubernetes_scanned"] == 3
+        # 4 results: Namespace PSA, Role, Pod container, Namespace isolation
+        assert result["summary"]["kubernetes_scanned"] == 4
         kinds = {r["kind"] for r in result["results"]}
         assert "Namespace" in kinds
         assert "Role" in kinds
         assert "Pod" in kinds
-        # All should be clean in this case
+        # Per-resource scans should be clean; namespace isolation
+        # violations are expected (no ResourceQuota/NetworkPolicy)
+        isolation_vios = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "namespace_quota_missing" in isolation_vios
+        assert "namespace_default_deny_missing" in isolation_vios
+        # Non-isolation results should all be clean
         for r in result["results"]:
+            if any(
+                v["id"] in ("namespace_quota_missing", "namespace_default_deny_missing")
+                for v in r["violations"]
+            ):
+                continue
             assert r["status"] == "clean", (
                 f"{r['kind']}/{r['resource']} has violations: "
                 f"{[v['id'] for v in r['violations']]}"
@@ -4145,3 +4157,139 @@ kubelet-arg:
         assert len(k3s_api) == 1
         vio_ids = [v["id"] for v in k3s_api[0]["violations"]]
         assert "apiserver_audit_retention_missing" in vio_ids
+
+
+# ================================================================== #
+# Cross-manifest namespace analysis
+# ================================================================== #
+
+
+class TestNamespaceIsolation:
+    def test_namespace_missing_quota_and_netpol(self, tmp_path):
+        """Namespace without ResourceQuota or default-deny should be flagged."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "ns.yaml",
+            """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-ns
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        iso = [
+            r
+            for r in result["results"]
+            if r["kind"] == "Namespace" and r["status"] == "violated"
+        ]
+        assert len(iso) == 1
+        vio_ids = [v["id"] for v in iso[0]["violations"]]
+        assert "namespace_quota_missing" in vio_ids
+        assert "namespace_default_deny_missing" in vio_ids
+
+    def test_namespace_with_quota_and_netpol_clean(self, tmp_path):
+        """Namespace with ResourceQuota + default-deny should pass."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "full.yaml",
+            """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-app
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: secure-app
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: secure-app
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        # Namespace PSA check should be clean, and no isolation violation
+        ns_results = [r for r in result["results"] if r["kind"] == "Namespace"]
+        # Only 1 Namespace result (PSA clean), no isolation entry
+        assert len(ns_results) == 1
+        assert ns_results[0]["status"] == "clean"
+
+    def test_system_namespaces_skipped(self, tmp_path):
+        """kube-system, kube-public should not trigger isolation check."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "sys.yaml",
+            """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        iso = [
+            r
+            for r in result["results"]
+            if r["status"] == "violated"
+            and any(v["id"] == "namespace_quota_missing" for v in r["violations"])
+        ]
+        # kube-system should NOT get isolation violations
+        assert len(iso) == 0
+
+    def test_quota_present_netpol_missing(self, tmp_path):
+        """Namespace with ResourceQuota but no NetworkPolicy."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "partial.yaml",
+            """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: partial-ns
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota
+  namespace: partial-ns
+spec:
+  hard:
+    pods: "10"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        iso = [
+            r
+            for r in result["results"]
+            if r["kind"] == "Namespace" and r["status"] == "violated"
+        ]
+        assert len(iso) == 1
+        vio_ids = [v["id"] for v in iso[0]["violations"]]
+        assert "namespace_quota_missing" not in vio_ids
+        assert "namespace_default_deny_missing" in vio_ids

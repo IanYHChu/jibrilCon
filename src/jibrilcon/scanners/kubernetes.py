@@ -735,6 +735,7 @@ _INFRA_KINDS = frozenset(
         "Secret",
         "PersistentVolume",
         "PodSecurityPolicy",
+        "ResourceQuota",
     }
 )
 
@@ -1253,6 +1254,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
+    # Cross-manifest tracking for post-scan namespace analysis
+    namespaces_seen: set[str] = set()
+    namespaces_with_quota: set[str] = set()
+    namespaces_with_deny_netpol: set[str] = set()
+    # Track manifest source for namespace violations
+    namespace_source: dict[str, str] = {}
+
     manifest_files = _discover_manifests(mount_path)
     if not manifest_files:
         logger.info("No Kubernetes manifests found under %s", mount_path)
@@ -1405,10 +1413,31 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                 key = f"{kind}/{resource_name}"
                 if kind == "Namespace":
                     data = _extract_namespace_fields(doc)
+                    namespaces_seen.add(resource_name)
+                    namespace_source[resource_name] = fpath
+                elif kind == "ResourceQuota":
+                    ns = (doc.get("metadata") or {}).get("namespace", "default")
+                    namespaces_with_quota.add(ns)
+                    continue  # no per-resource rules for RQ
                 elif kind == "Secret":
                     data = _extract_secret_fields(doc)
                 elif kind == "NetworkPolicy":
                     data = _extract_netpol_fields(doc)
+                    # Track default-deny: empty podSelector + no
+                    # ingress/egress rules = deny-all
+                    spec = doc.get("spec") or {}
+                    selector = spec.get("podSelector") or {}
+                    ingress = spec.get("ingress")
+                    egress = spec.get("egress")
+                    is_deny_all = (
+                        not selector.get("matchLabels")
+                        and not selector.get("matchExpressions")
+                        and ingress is None
+                        and egress is None
+                    )
+                    if is_deny_all:
+                        ns = (doc.get("metadata") or {}).get("namespace", "default")
+                        namespaces_with_deny_netpol.add(ns)
                 elif kind == "PersistentVolume":
                     data = _extract_pv_fields(doc)
                 elif kind == "PodSecurityPolicy":
@@ -1671,6 +1700,94 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         "status": status,
                         "managed": True,
                     }
+
+    # --- Post-scan: cross-manifest namespace analysis ---
+    # Skip system namespaces that don't need ResourceQuota/NetworkPolicy
+    _SYSTEM_NS = {"kube-system", "kube-public", "kube-node-lease"}
+    for ns_name in sorted(namespaces_seen - _SYSTEM_NS):
+        vios: list[dict[str, Any]] = []
+        source = namespace_source.get(ns_name, "<unknown>")
+
+        if ns_name not in namespaces_with_quota:
+            vios.append(
+                {
+                    "id": "namespace_quota_missing",
+                    "type": "warning",
+                    "severity": 5.0,
+                    "description": ("Namespace has no ResourceQuota"),
+                    "risk": (
+                        "Without a ResourceQuota, pods in this namespace "
+                        "can consume unlimited CPU, memory, and storage, "
+                        "potentially starving other namespaces on the same "
+                        "node."
+                    ),
+                    "remediation": (
+                        "Create a ResourceQuota in this namespace to limit "
+                        "aggregate resource consumption."
+                    ),
+                    "references": {
+                        "cis_kubernetes_benchmark": ["5.2"],
+                        "nist_800_190": ["4.5"],
+                    },
+                    "source": (
+                        "/" + str(Path(source).relative_to(Path(mount_path)))
+                        if source != "<unknown>"
+                        else "<cross-manifest>"
+                    ),
+                    "lines": [
+                        f"Namespace '{ns_name}' has no ResourceQuota",
+                    ],
+                }
+            )
+
+        if ns_name not in namespaces_with_deny_netpol:
+            vios.append(
+                {
+                    "id": "namespace_default_deny_missing",
+                    "type": "warning",
+                    "severity": 6.0,
+                    "description": ("Namespace has no default-deny NetworkPolicy"),
+                    "risk": (
+                        "Without a default-deny NetworkPolicy, all pods in "
+                        "this namespace can communicate freely with any pod "
+                        "in the cluster. An attacker who compromises one "
+                        "container can scan and reach all other services."
+                    ),
+                    "remediation": (
+                        "Create a NetworkPolicy with empty podSelector and "
+                        "no ingress/egress rules to deny all traffic by "
+                        "default, then add explicit allow rules."
+                    ),
+                    "references": {
+                        "cis_kubernetes_benchmark": ["5.3.2"],
+                        "nist_800_190": ["4.4"],
+                    },
+                    "source": (
+                        "/" + str(Path(source).relative_to(Path(mount_path)))
+                        if source != "<unknown>"
+                        else "<cross-manifest>"
+                    ),
+                    "lines": [
+                        f"Namespace '{ns_name}' has no default-deny NetworkPolicy",
+                    ],
+                }
+            )
+
+        if vios:
+            key = f"Namespace/{ns_name}/isolation"
+            status = "violated"
+            if any(v.get("severity", 0) >= 6.0 for v in vios):
+                alert_count += 1
+            else:
+                warn_count += 1
+            results_map[key] = {
+                "kind": "Namespace",
+                "resource": ns_name,
+                "container": "",
+                "violations": vios,
+                "status": status,
+                "managed": True,
+            }
 
     summary = {
         "kubernetes_scanned": len(results_map),

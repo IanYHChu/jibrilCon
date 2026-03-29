@@ -75,7 +75,7 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - [x] Validate `fsGroup` in pod security context
 - [x] Check liveness/readiness probe security (exec probes with arbitrary commands)
 - [x] Validate volume types: NFS, iSCSI, flexVolume (implicit security properties)
-- [ ] Detect missing `ResourceQuota` / default-deny `NetworkPolicy` per namespace (deferred -- requires cross-manifest correlation that is beyond the current per-manifest scanning architecture)
+- [x] Detect missing `ResourceQuota` / default-deny `NetworkPolicy` per namespace (post-scan cross-manifest analysis)
 - [x] Scan `PersistentVolume` for hostPath PVs
 - [x] Detect workload-specific risks (DaemonSet on all nodes, CronJob history limits)
 
