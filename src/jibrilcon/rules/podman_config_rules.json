@@ -358,6 +358,54 @@
       ]
     },
     {
+      "id": "memory_limit_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No memory limit configured in OCI runtime spec",
+      "risk": "Without a memory limit, a runaway process can consume all host memory, triggering the OOM killer against arbitrary host processes.",
+      "remediation": "Set linux.resources.memory.limit in the OCI runtime spec or use --memory flag at container creation.",
+      "references": {
+        "mitre_attack": ["T1499.001"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "memory_limit_missing", "operator": "equals", "value": true}
+      ]
+    },
+    {
+      "id": "pids_limit_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No PID limit configured in OCI runtime spec",
+      "risk": "Without a PID limit, a fork bomb inside the container can exhaust the host PID table, causing a system-wide denial of service.",
+      "remediation": "Set linux.resources.pids.limit in the OCI runtime spec or use --pids-limit flag.",
+      "references": {
+        "mitre_attack": ["T1499.001"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "pids_limit_missing", "operator": "equals", "value": true}
+      ]
+    },
+    {
+      "id": "critical_masks_missing",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Critical kernel interfaces not masked (linux.maskedPaths incomplete)",
+      "risk": "Without masking /proc/kcore, /proc/sysrq-trigger, and similar interfaces, a container process can read kernel memory or trigger system reboots via sysrq.",
+      "remediation": "Ensure linux.maskedPaths includes at minimum: /proc/kcore, /proc/sysrq-trigger, /proc/mem, /proc/kmsg.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "critical_masks_missing", "operator": "equals", "value": true}
+      ]
+    },
+    {
       "id": "systemd_service_missing",
       "type": "alert",
       "severity": 7.0,

@@ -28,6 +28,38 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 - `lxc.mount.auto` is LXC-unique, no equivalent in Docker/Podman
 - Config paths are unpredictable -- os.walk MUST be preserved
 
+## Docker Scanner
+
+### HIGH
+- [x] Analyse daemon config (`/etc/docker/daemon.json`): `userns-remap`, `icc` (partial: iptables, no-new-privileges, default-ulimits, log-driver, seccomp-profile remaining)
+- [x] Detect container `Config.User` empty or root (root inside container, independent of systemd User=)
+- [x] Detect missing resource limits: `Memory`, `PidsLimit` (NanoCpus, CpuQuota, MemorySwap remaining)
+- [x] Detect `RestartPolicy.Name = always` (persistence vector for compromised containers)
+- [x] Detect `LogConfig.Type = none` (audit trail disabled)
+- [ ] Detect dangerous `DeviceCgroupRules` (e.g., `a *:* rwm` grants all device access)
+- [ ] Detect dangerous `Devices[]` array entries (`/dev/mem`, `/dev/kmem`, `/dev/fuse`, `/dev/net/tun`)
+
+### MEDIUM
+- [ ] Detect Docker socket mount writable (check `ro` option on `/var/run/docker.sock` bind)
+- [ ] Detect `ExtraHosts` injection (custom /etc/hosts entries)
+- [ ] Detect `Ulimits` excessive values (file descriptor exhaustion)
+- [ ] Detect SELinux `label=type=spc_t` (super privileged container type)
+
+## Podman Scanner
+
+### HIGH
+- [x] Check all 5 OCI capability sets: ambient, inheritable, permitted (now all 5 checked)
+- [x] Validate `linux.maskedPaths` includes critical paths (`/proc/kcore`, `/proc/sysrq-trigger`, `/proc/mem`)
+- [ ] Validate `linux.readonlyPaths` includes `/proc/sys`, `/proc/irq`, `/sys/firmware`
+- [ ] Detect SELinux label issues: `process.selinuxLabel` with `spc_t` or missing on RHEL-based systems
+- [x] Detect missing resource limits: `linux.resources.memory.limit`, `linux.resources.pids.limit` (cpu remaining)
+
+### MEDIUM
+- [ ] Validate `linux.resources.devices` allowlist strictness (deny dangerous devices)
+- [ ] Check `rootfsPropagation` is not "shared"
+- [ ] Detect sensitive data in `process.env` (API keys, passwords, LD_PRELOAD)
+- [ ] Read `containers.conf` system/user defaults for baseline security settings
+
 ## Kubernetes Scanner
 
 ### CRITICAL

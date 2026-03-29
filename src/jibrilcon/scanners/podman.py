@@ -79,6 +79,10 @@ _DANGEROUS_CAPS = frozenset(
     }
 )
 
+_CRITICAL_MASKED = frozenset(
+    {"/proc/kcore", "/proc/sysrq-trigger", "/proc/mem", "/proc/kmsg"}
+)
+
 _DANGEROUS_BIND_PATHS = frozenset(
     {
         "/",
@@ -110,6 +114,9 @@ _FIELD_TO_CONFIG_KEY = {
     "no_new_privileges_missing": "process.noNewPrivileges",
     "apparmor_disabled": "process.apparmorProfile",
     "mount_propagation_shared": "mounts[].options",
+    "memory_limit_missing": "linux.resources.memory.limit",
+    "pids_limit_missing": "linux.resources.pids.limit",
+    "critical_masks_missing": "linux.maskedPaths",
     "runtime_mode": "runtime_mode",
     "systemd_service_found": "systemd.service",
     "systemd_user": "systemd.User",
@@ -217,6 +224,15 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
             type(caps_effective).__name__,
         )
         caps_effective = []
+    caps_ambient = caps_obj.get("ambient", [])
+    if not isinstance(caps_ambient, list):
+        caps_ambient = []
+    caps_inheritable = caps_obj.get("inheritable", [])
+    if not isinstance(caps_inheritable, list):
+        caps_inheritable = []
+    caps_permitted = caps_obj.get("permitted", [])
+    if not isinstance(caps_permitted, list):
+        caps_permitted = []
 
     seccomp_present = "seccompProfilePath" in cfg.get("linux", {})
 
@@ -231,8 +247,14 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     # OCI spec: root.readonly indicates read-only rootfs
     readonly_rootfs = cfg.get("root", {}).get("readonly", False)
 
-    # Dangerous capabilities in bounding OR effective sets
-    all_caps = set(caps_bounding) | set(caps_effective)
+    # Dangerous capabilities in any of the 5 OCI capability sets
+    all_caps = (
+        set(caps_bounding)
+        | set(caps_effective)
+        | set(caps_ambient)
+        | set(caps_inheritable)
+        | set(caps_permitted)
+    )
     dangerous_caps_present = bool(all_caps & _DANGEROUS_CAPS)
 
     # OCI spec: linux.namespaces is an array of {"type": ..., "path": ...}
@@ -271,6 +293,20 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
         for m in mounts
     )
 
+    # OCI resource limits
+    resources = cfg.get("linux", {}).get("resources", {})
+    memory_cfg = resources.get("memory", {})
+    memory_limit = memory_cfg.get("limit") if isinstance(memory_cfg, dict) else None
+    memory_limit_missing = memory_limit is None or memory_limit <= 0
+
+    pids_cfg = resources.get("pids", {})
+    pids_limit = pids_cfg.get("limit") if isinstance(pids_cfg, dict) else None
+    pids_limit_missing = pids_limit is None or pids_limit <= 0
+
+    # Critical kernel interfaces that should be masked
+    masked_paths = set(cfg.get("linux", {}).get("maskedPaths", []))
+    critical_masks_missing = bool(_CRITICAL_MASKED - masked_paths)
+
     return {
         "process.user.uid": uid,
         "has_cap_sys_admin": has_cap_sys_admin,
@@ -285,6 +321,9 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
         "no_new_privileges_missing": no_new_privileges_missing,
         "apparmor_disabled": apparmor_disabled,
         "mount_propagation_shared": mount_propagation_shared,
+        "memory_limit_missing": memory_limit_missing,
+        "pids_limit_missing": pids_limit_missing,
+        "critical_masks_missing": critical_masks_missing,
     }
 
 

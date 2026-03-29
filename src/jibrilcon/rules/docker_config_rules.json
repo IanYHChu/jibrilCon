@@ -372,6 +372,135 @@
       ]
     },
     {
+      "id": "container_user_is_root",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Container process runs as root (Config.User is empty, 'root', or '0')",
+      "risk": "Processes inside the container execute as UID 0. Combined with a container escape, this grants immediate host root access in rootful mode.",
+      "remediation": "Set a non-root user in the Dockerfile (USER directive) or via --user flag at container creation.",
+      "references": {
+        "mitre_attack": ["T1078.003"],
+        "cis_docker_benchmark": ["5.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "container_user_is_root", "operator": "equals", "value": true}
+      ],
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 2.0,
+          "type": "info"
+        }
+      ]
+    },
+    {
+      "id": "memory_limit_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No memory limit configured for the container",
+      "risk": "Without a memory limit, a runaway process can consume all host memory, triggering the OOM killer against arbitrary host processes including other containers.",
+      "remediation": "Set a memory limit via --memory flag or HostConfig.Memory field.",
+      "references": {
+        "mitre_attack": ["T1499.001"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "memory_limit_missing", "operator": "equals", "value": true}
+      ]
+    },
+    {
+      "id": "pids_limit_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "No PID limit configured for the container",
+      "risk": "Without a PID limit, a fork bomb inside the container can exhaust the host PID table, causing a system-wide denial of service.",
+      "remediation": "Set a PID limit via --pids-limit flag or HostConfig.PidsLimit field.",
+      "references": {
+        "mitre_attack": ["T1499.001"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "pids_limit_missing", "operator": "equals", "value": true}
+      ]
+    },
+    {
+      "id": "restart_always",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Container restart policy is set to 'always' or 'unless-stopped'",
+      "risk": "A compromised container with an always-restart policy will automatically recover after crashes, providing persistence for an attacker. Combined with privileged access, this enables sustained exploitation.",
+      "remediation": "Use 'on-failure' with a maximum retry count instead of 'always'. In systemd-managed environments, rely on systemd restart policies.",
+      "references": {
+        "mitre_attack": ["T1098"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "restart_always", "operator": "equals", "value": true}
+      ]
+    },
+    {
+      "id": "logging_disabled",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Container logging is disabled (LogConfig.Type = none)",
+      "risk": "Disabled logging removes evidence of container activity. An attacker's actions inside the container will leave no audit trail, making incident response and forensic analysis impossible.",
+      "remediation": "Use a logging driver (json-file, journald, syslog) with appropriate size limits.",
+      "references": {
+        "mitre_attack": ["T1562.002"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "logging_disabled", "operator": "equals", "value": true}
+      ]
+    },
+    {
+      "id": "daemon_userns_remap_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "Docker daemon does not enable user namespace remapping (userns-remap)",
+      "risk": "Without userns-remap, container UID 0 maps directly to host UID 0. Any container escape grants immediate root access to the host.",
+      "remediation": "Add '\"userns-remap\": \"default\"' to /etc/docker/daemon.json to enable user namespace isolation.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "cis_docker_benchmark": ["2.8"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "daemon_userns_remap_missing", "operator": "equals", "value": true}
+      ],
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 2.0,
+          "type": "info"
+        }
+      ]
+    },
+    {
+      "id": "daemon_icc_enabled",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "Docker daemon allows inter-container communication (icc not disabled)",
+      "risk": "With icc enabled (default), any container can communicate with any other container on the same bridge network without explicit links or network policies. An attacker who compromises one container can scan and attack others.",
+      "remediation": "Add '\"icc\": false' to /etc/docker/daemon.json and use explicit --link or user-defined networks for inter-container communication.",
+      "references": {
+        "mitre_attack": ["T1046"],
+        "cis_docker_benchmark": ["2.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {"field": "daemon_icc_enabled", "operator": "equals", "value": true}
+      ]
+    },
+    {
       "id": "systemd_service_missing",
       "type": "alert",
       "severity": 7.0,

@@ -14,16 +14,24 @@ from tests.conftest import _make_context
 class TestDockerScanner:
     def test_clean_container(self, make_rootfs):
         r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
         cid = "aaa" * 8 + "0" * 40
         r.add_docker_container(
             cid,
-            config_v2={"Name": "/clean", "Config": {"Image": "myapp:v1.0"}},
+            config_v2={
+                "Name": "/clean",
+                "Config": {"User": "appuser", "Image": "myapp:v1.0"},
+            },
             hostconfig={
                 "Privileged": False,
                 "ReadonlyRootfs": True,
                 "Binds": ["/data:/data:ro"],
                 "CapDrop": ["ALL"],
                 "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
             },
         )
         ctx = _make_context()
@@ -203,16 +211,24 @@ class TestDockerScanner:
 
     def test_bind_mount_readonly_with_extra_options(self, make_rootfs):
         r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
         cid = "fff" * 8 + "0" * 40
         r.add_docker_container(
             cid,
-            config_v2={"Name": "/roextra", "Config": {"Image": "myapp:v1.0"}},
+            config_v2={
+                "Name": "/roextra",
+                "Config": {"User": "appuser", "Image": "myapp:v1.0"},
+            },
             hostconfig={
                 "Privileged": False,
                 "ReadonlyRootfs": True,
                 "Binds": ["/data:/data:ro,rslave"],
                 "CapDrop": ["ALL"],
                 "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
             },
         )
         ctx = _make_context()
@@ -488,10 +504,14 @@ class TestDockerScanner:
     def test_fully_hardened_container_clean(self, make_rootfs):
         """A container with all security best practices should trigger none of the new rules."""
         r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
         cid = "hrd" * 8 + "0" * 40
         r.add_docker_container(
             cid,
-            config_v2={"Name": "/hardened", "Config": {"Image": "myapp:v1.2.3"}},
+            config_v2={
+                "Name": "/hardened",
+                "Config": {"User": "appuser", "Image": "myapp:v1.2.3"},
+            },
             hostconfig={
                 "Privileged": False,
                 "ReadonlyRootfs": True,
@@ -506,6 +526,10 @@ class TestDockerScanner:
                     "seccomp=/path/to/profile.json",
                     "no-new-privileges",
                 ],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
             },
         )
         ctx = _make_context()
@@ -818,6 +842,182 @@ class TestDockerScanner:
         assert by_name["managed_ctr"]["managed"] is True
         assert by_name["orphaned_ctr"]["managed"] is False
 
+    # -- New HIGH priority rules --
+
+    def test_container_user_root_detected(self, make_rootfs):
+        """Container with empty User (runs as root) should trigger warning."""
+        r = make_rootfs
+        cid = "usr" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/rootuser", "Config": {"User": "", "Image": "app:v1"}},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "rootuser")
+        ctx.set_service_meta(
+            "docker",
+            "rootuser",
+            {
+                "user": "dockeruser",
+                "unit": "docker-rootuser.service",
+                "path": "etc/systemd/system/docker-rootuser.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "container_user_is_root" in vio_ids
+
+    def test_memory_limit_missing_detected(self, make_rootfs):
+        """Container without memory limit should trigger warning."""
+        r = make_rootfs
+        cid = "mem" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/nomem", "Config": {"Image": "app:v1"}},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 0,
+                "PidsLimit": 100,
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "nomem")
+        ctx.set_service_meta(
+            "docker",
+            "nomem",
+            {
+                "user": "dockeruser",
+                "unit": "docker-nomem.service",
+                "path": "etc/systemd/system/docker-nomem.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "memory_limit_missing" in vio_ids
+
+    def test_restart_always_detected(self, make_rootfs):
+        """Container with restart=always should trigger warning."""
+        r = make_rootfs
+        cid = "rst" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/restartalways", "Config": {"Image": "app:v1"}},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "always", "MaximumRetryCount": 0},
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "restartalways")
+        ctx.set_service_meta(
+            "docker",
+            "restartalways",
+            {
+                "user": "dockeruser",
+                "unit": "docker-restart.service",
+                "path": "etc/systemd/system/docker-restart.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "restart_always" in vio_ids
+
+    def test_logging_disabled_detected(self, make_rootfs):
+        """Container with logging disabled should trigger warning."""
+        r = make_rootfs
+        cid = "log" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/nolog", "Config": {"Image": "app:v1"}},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "LogConfig": {"Type": "none", "Config": {}},
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "nolog")
+        ctx.set_service_meta(
+            "docker",
+            "nolog",
+            {
+                "user": "dockeruser",
+                "unit": "docker-nolog.service",
+                "path": "etc/systemd/system/docker-nolog.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "logging_disabled" in vio_ids
+
+    def test_daemon_userns_remap_missing_detected(self, make_rootfs):
+        """Daemon without userns-remap should trigger warning."""
+        r = make_rootfs
+        r.add_docker_daemon_json({})  # empty daemon.json, no userns-remap
+        cid = "dmn" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/daemon_test", "Config": {"Image": "app:v1"}},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "daemon_test")
+        ctx.set_service_meta(
+            "docker",
+            "daemon_test",
+            {
+                "user": "dockeruser",
+                "unit": "docker-daemon.service",
+                "path": "etc/systemd/system/docker-daemon.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "daemon_userns_remap_missing" in vio_ids
+        assert "daemon_icc_enabled" in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # Podman scanner
@@ -874,6 +1074,16 @@ class TestPodmanScanner:
                         {"type": "ipc"},
                         {"type": "mount"},
                         {"type": "uts"},
+                    ],
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
                     ],
                 },
             },
@@ -1451,6 +1661,145 @@ class TestPodmanScanner:
         result = podman.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "mount_propagation_shared" in vio_ids
+
+    def test_dangerous_caps_in_ambient(self, make_rootfs):
+        """Dangerous capabilities in ambient set should be detected."""
+        r = make_rootfs
+        cid = "amb" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "ambient_caps",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {
+                        "bounding": [],
+                        "effective": [],
+                        "ambient": ["CAP_SYS_ADMIN"],
+                    },
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "ambient_caps")
+        ctx.set_service_meta(
+            "podman",
+            "ambient_caps",
+            {
+                "user": "podmanuser",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_caps_present" in vio_ids
+
+    def test_memory_limit_missing_detected(self, make_rootfs):
+        """Container without memory limit should trigger warning."""
+        r = make_rootfs
+        cid = "mem" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "nomem",
+            {
+                "process": {"user": {"uid": 1000}, "noNewPrivileges": True},
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "nomem")
+        ctx.set_service_meta(
+            "podman",
+            "nomem",
+            {
+                "user": "podmanuser",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "memory_limit_missing" in vio_ids
+        assert "pids_limit_missing" in vio_ids
+
+    def test_critical_masks_missing_detected(self, make_rootfs):
+        """Missing critical masked paths should trigger warning."""
+        r = make_rootfs
+        cid = "msk" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "nomask",
+            {
+                "process": {"user": {"uid": 1000}, "noNewPrivileges": True},
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                    "maskedPaths": [],
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("podman", "nomask")
+        ctx.set_service_meta(
+            "podman",
+            "nomask",
+            {
+                "user": "podmanuser",
+                "unit": "p.service",
+                "path": "etc/systemd/system/p.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "critical_masks_missing" in vio_ids
 
     def test_rootless_uid0_has_reduced_severity(self, make_rootfs):
         """Rootless Podman UID 0 should have lower severity than rootful."""

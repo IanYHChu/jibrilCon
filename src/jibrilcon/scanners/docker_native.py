@@ -95,6 +95,13 @@ _FIELD_TO_CONFIG_KEY = {
     "mount_propagation_shared": "HostConfig.Binds",
     "image_tag_latest": "Config.Image",
     "runtime_mode": "runtime_mode",
+    "container_user_is_root": "Config.User",
+    "memory_limit_missing": "HostConfig.Memory",
+    "pids_limit_missing": "HostConfig.PidsLimit",
+    "restart_always": "HostConfig.RestartPolicy",
+    "logging_disabled": "HostConfig.LogConfig",
+    "daemon_userns_remap_missing": "/etc/docker/daemon.json userns-remap",
+    "daemon_icc_enabled": "/etc/docker/daemon.json icc",
     "systemd_service_found": "systemd.service",
     "systemd_user": "systemd.User",
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
@@ -179,6 +186,20 @@ def _discover_container_dirs(rootfs: str) -> list[tuple[str, str, str, str]]:
                 name = cfg_json.get("Name", "").lstrip("/") or name
                 discovered.append((name, cfg, host, mode))
     return discovered
+
+
+def _extract_daemon_fields(rootfs: str) -> dict[str, Any]:
+    """Extract security fields from /etc/docker/daemon.json."""
+    cfg = load_json_or_empty(os.path.join(rootfs, "etc/docker/daemon.json"))
+    if not cfg:
+        return {
+            "daemon_userns_remap_missing": True,
+            "daemon_icc_enabled": True,
+        }
+    return {
+        "daemon_userns_remap_missing": "userns-remap" not in cfg,
+        "daemon_icc_enabled": cfg.get("icc", True) is not False,
+    }
 
 
 def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]:
@@ -287,6 +308,25 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     else:
         image_tag_latest = False
 
+    # Container user -- empty or "root" or "0" means UID 0 inside container
+    user_raw = cfg.get("Config", {}).get("User", "")
+    container_user_is_root = not user_raw or user_raw in ("root", "0")
+
+    # Resource limits -- 0 or missing means unlimited
+    memory_limit = host.get("Memory", 0)
+    memory_limit_missing = not isinstance(memory_limit, int) or memory_limit <= 0
+    pids_limit = host.get("PidsLimit", 0)
+    # PidsLimit can be 0, -1, or None for unlimited
+    pids_limit_missing = not isinstance(pids_limit, int) or pids_limit <= 0
+
+    # Restart policy -- always or unless-stopped is a persistence vector
+    restart_policy = host.get("RestartPolicy") or {}
+    restart_always = restart_policy.get("Name") in ("always", "unless-stopped")
+
+    # Logging -- disabled means no audit trail
+    log_config = host.get("LogConfig") or {}
+    logging_disabled = log_config.get("Type") == "none"
+
     return {
         "privileged": privileged,
         "readonly_rootfs": readonly_rootfs,
@@ -302,6 +342,11 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         "no_new_privileges_missing": no_new_privileges_missing,
         "mount_propagation_shared": mount_propagation_shared,
         "image_tag_latest": image_tag_latest,
+        "container_user_is_root": container_user_is_root,
+        "memory_limit_missing": memory_limit_missing,
+        "pids_limit_missing": pids_limit_missing,
+        "restart_always": restart_always,
+        "logging_disabled": logging_disabled,
     }
 
 
@@ -318,6 +363,7 @@ def _analyze_container(
     context: ScanContext,
     rules: list[dict[str, Any]],
     mount_path: str,
+    daemon_data: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
     """
     Load config, apply overrides, evaluate rules for a single container.
@@ -366,6 +412,8 @@ def _analyze_container(
 
     data = _extract_fields(cfg_json, host_json)
     data["runtime_mode"] = runtime_mode
+    if daemon_data:
+        data.update(daemon_data)
 
     # merge systemd inference: service_user_missing flag
     data["service_user_missing"] = context.is_user_missing(name)
@@ -447,6 +495,9 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
+    # Extract daemon-level security fields once for all containers
+    daemon_data = _extract_daemon_fields(mount_path)
+
     # Build a lookup of ALL containers found on disk
     on_disk: dict[str, tuple[str, str, str]] = {}
     for name, cfg_path, host_path, runtime_mode in _discover_container_dirs(mount_path):
@@ -459,7 +510,14 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
         if name in on_disk:
             cfg_path, host_path, runtime_mode = on_disk[name]
             vios, status = _analyze_container(
-                name, cfg_path, host_path, runtime_mode, context, rules, mount_path
+                name,
+                cfg_path,
+                host_path,
+                runtime_mode,
+                context,
+                rules,
+                mount_path,
+                daemon_data=daemon_data,
             )
             if any(v["type"] == "alert" for v in vios):
                 alert_count += 1
@@ -514,7 +572,14 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             continue  # already processed in Phase 1
         cfg_path, host_path, runtime_mode = on_disk[name]
         vios, status = _analyze_container(
-            name, cfg_path, host_path, runtime_mode, context, rules, mount_path
+            name,
+            cfg_path,
+            host_path,
+            runtime_mode,
+            context,
+            rules,
+            mount_path,
+            daemon_data=daemon_data,
         )
         if any(v["type"] == "alert" for v in vios):
             alert_count += 1
