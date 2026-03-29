@@ -19,7 +19,12 @@ import importlib
 import logging
 import pkgutil
 import time as _time
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    CancelledError,
+    ThreadPoolExecutor,
+    wait,
+)
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -143,6 +148,8 @@ def run_scanners(
                         results.append(res)
                     else:
                         logger.warning("Scanner %s returned non-dict result", name)
+                except CancelledError:
+                    logger.warning("Scanner %s was cancelled (timeout)", name)
                 except (RuntimeError, OSError) as exc:
                     logger.error("Scanner %s raised: %s", name, exc)
                 except (TypeError, ValueError) as exc:

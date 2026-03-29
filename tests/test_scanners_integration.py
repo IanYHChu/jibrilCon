@@ -103,10 +103,10 @@ class TestDockerScanner:
         assert "beta" in results_by_name
 
         # Both must have violations with DIFFERENT source paths
-        for name, container in results_by_name.items():
+        for _name, container in results_by_name.items():
             for vio in container["violations"]:
                 assert "source" in vio
-                assert name.lower() in "" or vio["source"]  # source is a path string
+                assert vio["source"]  # source must be a non-empty path string
                 # Key assertion: source must contain THIS container's cid, not the other's
                 assert cid_a[:12] in vio["source"] or cid_b[:12] in vio["source"]
 

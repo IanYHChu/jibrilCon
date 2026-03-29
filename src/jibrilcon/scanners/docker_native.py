@@ -265,8 +265,12 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     # --- Image tag :latest or missing ---
     image = cfg.get("Config", {}).get("Image", "") or cfg.get("Image", "")
     if isinstance(image, str) and image:
+        has_digest = "@" in image
         img_no_digest = image.split("@")[0]
-        if ":" not in img_no_digest:
+        if has_digest and ":" not in img_no_digest:
+            # Image pinned by digest without explicit tag — not "latest"
+            image_tag_latest = False
+        elif ":" not in img_no_digest:
             image_tag_latest = True
         else:
             tag = img_no_digest.rsplit(":", 1)[-1]

@@ -2,7 +2,19 @@
 
 import logging
 
+import pytest
+
 from jibrilcon.util.logging_utils import init_logging
+
+
+@pytest.fixture(autouse=True)
+def _clean_root_handlers():
+    """Remove handlers added by init_logging so tests don't leak state."""
+    root = logging.getLogger()
+    before = list(root.handlers)
+    yield
+    # Restore original handler list
+    root.handlers = before
 
 
 def test_init_logging_adds_handler():

@@ -98,5 +98,7 @@ def test_run_scan_empty_rootfs(make_rootfs):
     """An empty rootfs (no containers) should return an empty report."""
     r = make_rootfs
     report = run_scan(r.path)
-    assert report["report"] == [] or isinstance(report["report"], list)
+    assert isinstance(report["report"], list)
+    # Scanners run but find no containers, so every result list is empty
+    assert all(r["results"] == [] for r in report["report"])
     assert isinstance(report["summary"], dict)
