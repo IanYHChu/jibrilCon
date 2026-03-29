@@ -4,9 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _FAKE_SYSTEMD, _make_context, _write_binary
-
 from jibrilcon.scanners import kubernetes
+from tests.conftest import _FAKE_SYSTEMD, _make_context, _write_binary
 
 # ------------------------------------------------------------------ #
 # Helpers

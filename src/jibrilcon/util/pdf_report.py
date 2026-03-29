@@ -380,7 +380,11 @@ def _add_executive_summary(
         scanner = block.get("scanner", "unknown")
         # Try common scanner-count keys (use None checks; 0 is valid)
         scanned = len(block.get("results", []))
-        for key in ("docker_scanned", "podman_scanned", "lxc_scanned", "containers_scanned"):
+        _SCANNED_KEYS = (
+            "docker_scanned", "podman_scanned",
+            "lxc_scanned", "containers_scanned",
+        )
+        for key in _SCANNED_KEYS:
             val = s.get(key)
             if val is not None:
                 scanned = val

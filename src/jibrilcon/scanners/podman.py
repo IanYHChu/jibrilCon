@@ -350,7 +350,11 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         if isinstance(mod_data, dict):
                             deep_merge(cfg_json, mod_data)
                         else:
-                            logger.warning("TOML module %s is not a dict (got %s), skipping", mod_path, type(mod_data).__name__)
+                            logger.warning(
+                                "TOML module %s is not a dict (got %s), skipping",
+                                mod_path,
+                                type(mod_data).__name__,
+                            )
                     except (OSError, ValueError, KeyError) as exc:
                         logger.warning(
                             "Skipping malformed module %s: %s", mod_path, exc

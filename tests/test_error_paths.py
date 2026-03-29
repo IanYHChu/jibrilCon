@@ -7,14 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.conftest import _make_context
-
 from jibrilcon.util.config_loader import (
     ConfigLoadError,
     clear_cache,
     load_json_config,
 )
-
+from tests.conftest import _make_context
 
 # ------------------------------------------------------------------ #
 # 1. CLI: run_scan raises RuntimeError -> sys.exit(1)

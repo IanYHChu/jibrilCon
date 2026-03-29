@@ -2,12 +2,10 @@
 
 from pathlib import Path
 
-from tests.conftest import _make_context, _write_text
-
 from jibrilcon.scanners import docker_native, lxc, podman
 from jibrilcon.scanners.docker_native import _extract_fields, _to_bool
 from jibrilcon.util.context import ScanContext
-
+from tests.conftest import _make_context, _write_text
 
 # ------------------------------------------------------------------ #
 # Docker _to_bool() tests

@@ -3,10 +3,8 @@
 import json
 from pathlib import Path
 
-from tests.conftest import _make_context
-
 from jibrilcon.scanners import docker_native, lxc, podman
-
+from tests.conftest import _make_context
 
 # ------------------------------------------------------------------ #
 # Docker scanner

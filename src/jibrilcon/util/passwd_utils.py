@@ -53,7 +53,7 @@ def get_user_home_dirs(rootfs: str) -> list[str]:
                             homes.append(str(safe_home))
                         except ValueError:
                             logger.warning(
-                                "Skipping passwd home directory that escapes rootfs: %s",
+                                "Skipping passwd home that escapes rootfs: %s",
                                 home,
                             )
             except UnicodeDecodeError:
