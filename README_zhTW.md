@@ -61,6 +61,35 @@ python3 -m jibrilcon /mnt/target-rootfs --max-workers 4
 
 ---
 
+## 程式化 API
+
+jibrilcon 可作為 Python 函式庫使用,整合到更大的工具鏈或自訂自動化腳本中。
+
+```python
+from pathlib import Path
+from jibrilcon.core import run_scan
+from jibrilcon.util.report_writer import write_report
+
+# 執行掃描並取得報告 dict
+report = run_scan(
+    "/mnt/target-rootfs",
+    max_workers=4,          # 並行掃描器執行緒數 (預設: 8)
+    scanner_timeout=300.0,  # 每個掃描器的逾時秒數
+)
+
+# 以程式方式檢視結果
+for block in report["report"]:
+    print(f"{block['scanner']}: {block['summary']}")
+
+# 寫入磁碟 (依副檔名自動判斷 JSON 或 gzip)
+write_report(report, Path("report.json"))
+write_report(report, Path("report.json.gz"))  # 自動壓縮
+```
+
+`run_scan()` 回傳的 dict 結構與下方[報告格式](#報告格式)章節所述相同。`write_report()` 採用 atomic write (暫存檔 + rename),不會產生不完整的輸出檔案。
+
+---
+
 ## 報告格式
 
 ### 頂層結構
@@ -135,6 +164,65 @@ python3 -m jibrilcon /mnt/target-rootfs --max-workers 4
 | `references` | object | 安全框架對應 (MITRE ATT&CK、CIS、NIST) |
 | `source` | string | 相對於掛載點的組態檔路徑 |
 | `lines` | array | 觸發規則的具體組態項目 |
+
+### 範例輸出
+
+一個包含兩項違規的 Docker 容器的實際報告範例:
+
+```json
+{
+  "report": [
+    {
+      "scanner": "docker",
+      "summary": { "alerts": 1, "warnings": 1 },
+      "results": [
+        {
+          "container": "web-gateway",
+          "status": "violated",
+          "violations": [
+            {
+              "id": "privileged",
+              "type": "alert",
+              "severity": 9.0,
+              "description": "Container is running in privileged mode",
+              "risk": "Grants full access to all host devices and disables most kernel isolation.",
+              "remediation": "Remove --privileged flag. Use --cap-add for specific capabilities.",
+              "references": {
+                "mitre_attack": ["T1611"],
+                "cis_docker_benchmark": ["5.4"],
+                "nist_800_190": ["4.4"]
+              },
+              "source": "/var/lib/docker/containers/abc123/config.v2.json",
+              "lines": ["HostConfig.Privileged = True"]
+            },
+            {
+              "id": "pid_mode",
+              "type": "warning",
+              "severity": 5.0,
+              "description": "Container shares the host PID namespace",
+              "risk": "Processes inside the container can see and signal host processes.",
+              "remediation": "Remove --pid=host unless process visibility is required.",
+              "references": {
+                "mitre_attack": ["T1611"],
+                "cis_docker_benchmark": ["5.15"]
+              },
+              "source": "/var/lib/docker/containers/abc123/hostconfig.json",
+              "lines": ["PidMode = host"]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "alerts": 1,
+    "warnings": 1,
+    "clean": 0,
+    "violated": 1,
+    "scanners_run": ["docker"]
+  }
+}
+```
 
 ### 嚴重度量表
 
@@ -228,6 +316,9 @@ src/jibrilcon/
 }
 ```
 
+完整的規則 DSL 文件 -- 包含所有支援的運算子、巢狀規則群組,以及撰寫新規則的指引 -- 請參閱
+[`src/jibrilcon/rules/README.md`](src/jibrilcon/rules/README.md)。
+
 ---
 
 ## 開發
@@ -253,6 +344,55 @@ ruff check src/ tests/
 | 1 | 執行期錯誤 (例如權限不足、組態損毀) |
 | 2 | 參數錯誤 (無效旗標、缺少掛載路徑) |
 | 130 | 使用者中斷 (Ctrl+C / SIGINT) |
+
+---
+
+## 疑難排解 / FAQ
+
+**掃描掛載路徑時出現 "Permission denied"**
+
+掃描器需要對 rootfs 下所有檔案的讀取權限。請以 root 身分執行或調整目錄權限:
+
+```bash
+sudo python3 -m jibrilcon /mnt/target-rootfs
+```
+
+**未偵測到容器**
+
+jibrilcon 透過解析 systemd service 檔案來發現容器。請確認 rootfs 中包含參照容器執行環境 (docker、podman、lxc) 的 `.service` unit。若映像使用 sysvinit 或 openrc,請透過 `--log-level debug` 確認 init 系統是否被正確偵測。
+
+**掃描速度緩慢**
+
+LXC 掃描器會對整個 rootfs 執行完整的 `os.walk`,因為 LXC 組態路徑無法預測 -- 這是設計使然,不是 bug。對於大型檔案系統,掃描時間會較長。可使用 `--max-workers 1` 降低資源使用,或增加數值以在 SSD 上獲得更高的 I/O 吞吐量。
+
+**啟用詳細日誌**
+
+```bash
+python3 -m jibrilcon /mnt/target-rootfs --log-level debug
+```
+
+這會追蹤每個被檢查的檔案和每條被評估的規則,有助於診斷漏報或理解掃描器行為。
+
+**如何整合 CI/CD**
+
+使用 exit code 和 JSON 輸出進行自動化:
+
+```bash
+python3 -m jibrilcon /mnt/rootfs --no-color -o report.json
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo "Scan failed (exit code $rc)" >&2
+  exit $rc
+fi
+# 解析 report.json 中的 alerts/warnings
+alerts=$(python3 -c "import json; r=json.load(open('report.json')); print(r['summary']['alerts'])")
+if [ "$alerts" -gt 0 ]; then
+  echo "Found $alerts alert(s) -- failing pipeline" >&2
+  exit 1
+fi
+```
+
+Exit code 0 表示掃描完成 (仍可能存在違規)。請檢查 JSON 輸出中的 `summary.alerts` 來決定是否中斷 pipeline。詳見 [Exit Codes](#exit-codes)。
 
 ---
 
