@@ -1,0 +1,277 @@
+{
+  "rules": [
+    {
+      "id": "apiserver_anonymous_auth",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "kube-apiserver has anonymous authentication enabled",
+      "risk": "Anonymous authentication allows unauthenticated requests to the API server. An attacker on the network can query or modify cluster resources without any credentials.",
+      "remediation": "Set --anonymous-auth=false on the kube-apiserver command line.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["1.2.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_anonymous_auth",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apiserver_insecure_port",
+      "type": "alert",
+      "severity": 9.5,
+      "description": "kube-apiserver insecure port is enabled",
+      "risk": "The insecure port serves the API over HTTP without authentication or authorization. Any process on the network can perform any API operation with full cluster-admin privileges.",
+      "remediation": "Set --insecure-port=0 on the kube-apiserver command line. This flag is deprecated since Kubernetes 1.20 and removed in 1.24.",
+      "references": {
+        "mitre_attack": ["T1190"],
+        "cis_kubernetes_benchmark": ["1.2.19"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_insecure_port",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apiserver_authz_not_rbac",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "kube-apiserver authorization mode does not include RBAC",
+      "risk": "Without RBAC in the authorization chain, the cluster cannot enforce fine-grained access control. Modes like AlwaysAllow grant every authenticated request full permissions.",
+      "remediation": "Set --authorization-mode to include RBAC (e.g., --authorization-mode=Node,RBAC).",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["1.2.7"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_authz_not_rbac",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apiserver_encryption_missing",
+      "type": "warning",
+      "severity": 7.0,
+      "description": "kube-apiserver encryption-provider-config is not set",
+      "risk": "Without an encryption provider configuration, Kubernetes secrets and other sensitive resources are stored unencrypted in etcd. Anyone with access to etcd can read all secrets in plaintext.",
+      "remediation": "Configure --encryption-provider-config to point to an EncryptionConfiguration file that encrypts secrets at rest.",
+      "references": {
+        "mitre_attack": ["T1552"],
+        "cis_kubernetes_benchmark": ["1.2.29"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_encryption_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "apiserver_admission_missing",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "kube-apiserver has no admission plugins configured",
+      "risk": "Without admission plugins, the API server cannot enforce policies on incoming requests. Security-critical plugins like PodSecurity, NodeRestriction, and ServiceAccount will not be active.",
+      "remediation": "Set --enable-admission-plugins to include security-relevant plugins (e.g., NodeRestriction,PodSecurity,ServiceAccount).",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["1.2.11"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_admission_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "etcd_client_cert_missing",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "etcd client TLS certificate is not configured",
+      "risk": "Without client TLS, etcd serves its API over unencrypted HTTP. An attacker on the network can read and modify all cluster state including secrets, tokens, and configuration.",
+      "remediation": "Set --cert-file and --key-file on the etcd command line to enable client TLS.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["2.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "etcd_client_cert_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "etcd_client_key_missing",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "etcd client TLS key is not configured",
+      "risk": "Without the client TLS key, TLS cannot be properly established for etcd client connections. This leaves the etcd API unencrypted and vulnerable to eavesdropping.",
+      "remediation": "Set --key-file on the etcd command line alongside --cert-file.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["2.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "etcd_client_key_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "etcd_peer_cert_missing",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "etcd peer TLS certificate is not configured",
+      "risk": "Without peer TLS, etcd cluster members communicate over unencrypted connections. An attacker can impersonate an etcd peer, inject corrupted data, or eavesdrop on all replicated state.",
+      "remediation": "Set --peer-cert-file and --peer-key-file on the etcd command line to enable peer TLS.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["2.4"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "etcd_peer_cert_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "etcd_peer_key_missing",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "etcd peer TLS key is not configured",
+      "risk": "Without the peer TLS key, peer-to-peer TLS cannot be established. etcd members replicate data without encryption, exposing secrets during transit between nodes.",
+      "remediation": "Set --peer-key-file on the etcd command line alongside --peer-cert-file.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["2.4"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "etcd_peer_key_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "etcd_client_auto_tls",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "etcd auto-TLS is enabled for client connections",
+      "risk": "Auto-TLS generates self-signed certificates that are not verifiable by clients. This defeats certificate-based authentication and allows any client to connect to etcd without presenting a valid certificate.",
+      "remediation": "Set --auto-tls=false and configure proper CA-signed certificates with --cert-file and --key-file.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["2.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "etcd_client_auto_tls",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cm_sa_key_missing",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "kube-controller-manager service account private key is not configured",
+      "risk": "Without --service-account-private-key-file, the controller manager cannot sign service account tokens. Pods relying on projected tokens may fail authentication, and token rotation is ineffective.",
+      "remediation": "Set --service-account-private-key-file to the path of the service account signing key.",
+      "references": {
+        "mitre_attack": ["T1528"],
+        "cis_kubernetes_benchmark": ["1.3.3"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cm_sa_key_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cm_root_ca_missing",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "kube-controller-manager root CA file is not configured",
+      "risk": "Without --root-ca-file, service account tokens are not validated against the cluster CA. Pods cannot verify the API server certificate, enabling man-in-the-middle attacks on in-cluster communication.",
+      "remediation": "Set --root-ca-file to the path of the cluster root CA certificate.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "cis_kubernetes_benchmark": ["1.3.4"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cm_root_ca_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cm_sa_credentials_disabled",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "kube-controller-manager does not use individual service account credentials",
+      "risk": "Without --use-service-account-credentials=true, all controllers run with the controller manager's own credentials instead of individual service accounts. This violates least-privilege and makes it harder to audit controller actions.",
+      "remediation": "Set --use-service-account-credentials=true on the kube-controller-manager command line.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["1.3.2"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cm_sa_credentials_disabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    }
+  ]
+}

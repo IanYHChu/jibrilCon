@@ -4,6 +4,7 @@
     "/usr/lib/systemd/system",
     "/lib/systemd/system"
   ],
+  "user_unit_dir_suffix": ".config/systemd/user",
   "exec_keys": [
     "ExecStart",
     "ExecStartPre"

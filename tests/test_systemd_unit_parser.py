@@ -134,3 +134,28 @@ def test_collect_caches_execstartpre(tmp_path):
         "ExecStartPre lines should be cached"
     )
     assert any("-d" in line for line in lines), "ExecStart lines should be cached"
+
+
+# ------------------------------------------------------------------ #
+# User-scope systemd service discovery (rootless daemons)
+# ------------------------------------------------------------------ #
+
+
+def test_user_scope_service_discovered(tmp_path):
+    """User-scope systemd services for rootless daemons should be found."""
+    # Create /etc/passwd with a test user
+    passwd = tmp_path / "etc" / "passwd"
+    passwd.parent.mkdir(parents=True, exist_ok=True)
+    passwd.write_text("testuser:x:1000:1000:Test:/home/testuser:/bin/bash\n")
+
+    # Create a user-scope service
+    user_svc_dir = tmp_path / "home" / "testuser" / ".config" / "systemd" / "user"
+    user_svc_dir.mkdir(parents=True, exist_ok=True)
+    svc = user_svc_dir / "docker-rootless.service"
+    svc.write_text(
+        "[Service]\nExecStart=/usr/bin/dockerd-rootless.sh --name mycontainer\n"
+    )
+
+    rows = scan_systemd_container_units(str(tmp_path))
+    engines = [r["engine"] for r in rows]
+    assert "docker" in engines

@@ -188,6 +188,27 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "rbac_binds_anonymous",
+      "type": "alert",
+      "severity": 9.5,
+      "description": "ClusterRoleBinding grants permissions to system:anonymous or system:unauthenticated",
+      "risk": "Granting permissions to anonymous or unauthenticated subjects allows any unauthenticated request to exercise those permissions. An attacker on the network can access the cluster without any credentials.",
+      "remediation": "Remove bindings to system:anonymous and system:unauthenticated subjects. Use proper service accounts with RBAC.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "cis_kubernetes_benchmark": ["5.1.8"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "binds_anonymous",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

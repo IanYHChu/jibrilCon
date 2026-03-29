@@ -1831,6 +1831,15 @@ streamingConnectionIdleTimeout: "5m"
 """,
         )
         ctx = _make_context()
+        ctx.set_service_meta(
+            "kubernetes",
+            "",
+            {
+                "unit": "kubelet.service",
+                "user": "root",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE CAP_SYS_PTRACE",
+            },
+        )
         result = kubernetes.scan(str(root), context=ctx)
         node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
         assert len(node) == 1
@@ -1903,6 +1912,15 @@ kubelet-arg:
 """,
         )
         ctx = _make_context()
+        ctx.set_service_meta(
+            "k3s",
+            "server",
+            {
+                "unit": "k3s.service",
+                "user": "root",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+            },
+        )
         result = kubernetes.scan(str(root), context=ctx)
         node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
         assert len(node) == 1
@@ -1936,3 +1954,418 @@ kubelet-arg:
         # Should not crash, just no NodeConfig results
         node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
         assert len(node) == 0
+
+
+# ================================================================== #
+# Phase 4: Systemd daemon service cross-validation
+# ================================================================== #
+
+
+class TestSystemdDaemonServiceValidation:
+    """Tests for systemd service cross-validation on K8s daemon nodes."""
+
+    def test_k3s_systemd_service_missing(self, tmp_path):
+        """K3s daemon without systemd service triggers alert."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+protect-kernel-defaults: true
+kubelet-arg:
+  - "anonymous-auth=false"
+  - "read-only-port=0"
+  - "authorization-mode=Webhook"
+""",
+        )
+        ctx = _make_context()
+        # No service meta set -> systemd_service_found will be false
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_systemd_service_missing" in vio_ids
+
+    def test_rke2_systemd_service_missing(self, tmp_path):
+        """RKE2 daemon without systemd service triggers alert."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "rke2").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "rke2" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_systemd_service_missing" in vio_ids
+
+    def test_kubeadm_systemd_service_missing(self, tmp_path):
+        """Kubeadm kubelet without systemd service triggers alert."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "kubernetes" / "manifests").mkdir(parents=True)
+        _write_yaml(
+            root / "var" / "lib" / "kubelet" / "config.yaml",
+            """\
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+authentication:
+  anonymous:
+    enabled: false
+authorization:
+  mode: Webhook
+readOnlyPort: 0
+protectKernelDefaults: true
+rotateCertificates: true
+serverTLSBootstrap: true
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_systemd_service_missing" in vio_ids
+
+    def test_k3s_systemd_caps_unrestricted(self, tmp_path):
+        """K3s daemon with systemd service but no CapabilityBoundingSet."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+protect-kernel-defaults: true
+kubelet-arg:
+  - "anonymous-auth=false"
+  - "read-only-port=0"
+  - "authorization-mode=Webhook"
+""",
+        )
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "k3s",
+            "server",
+            {
+                "unit": "k3s.service",
+                "user": "root",
+            },
+        )
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_systemd_service_missing" not in vio_ids
+        assert "kubelet_systemd_caps_unrestricted" in vio_ids
+
+    def test_k3s_systemd_caps_restricted(self, tmp_path):
+        """K3s daemon with systemd service and CapabilityBoundingSet passes."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+protect-kernel-defaults: true
+kubelet-arg:
+  - "anonymous-auth=false"
+  - "read-only-port=0"
+  - "authorization-mode=Webhook"
+""",
+        )
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "k3s",
+            "server",
+            {
+                "unit": "k3s.service",
+                "user": "root",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE CAP_SYS_PTRACE",
+            },
+        )
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_systemd_service_missing" not in vio_ids
+        assert "kubelet_systemd_caps_unrestricted" not in vio_ids
+
+    def test_rke2_agent_service_meta_found(self, tmp_path):
+        """RKE2 agent service meta is found when server is absent."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "rke2").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "rke2" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        # Only agent meta, no server meta
+        ctx.set_service_meta(
+            "rke2",
+            "agent",
+            {
+                "unit": "rke2-agent.service",
+                "user": "root",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+            },
+        )
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "kubelet_systemd_service_missing" not in vio_ids
+        assert "kubelet_systemd_caps_unrestricted" not in vio_ids
+
+
+# ================================================================== #
+# Phase 5: Control plane component scanning
+# ================================================================== #
+
+
+class TestControlPlaneAPIServer:
+    """Tests for kube-apiserver static pod manifest scanning."""
+
+    def test_insecure_apiserver(self, tmp_path):
+        """API server with insecure flags produces violations."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "kube-apiserver.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-apiserver
+spec:
+  containers:
+  - name: kube-apiserver
+    image: registry.k8s.io/kube-apiserver:v1.29.0
+    command:
+    - kube-apiserver
+    - --anonymous-auth=true
+    - --insecure-port=8080
+    - --authorization-mode=AlwaysAllow
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        assert len(cp) >= 1
+        apiserver = [r for r in cp if r["resource"] == "kube-apiserver"]
+        assert len(apiserver) == 1
+        vio_ids = [v["id"] for v in apiserver[0]["violations"]]
+        assert "apiserver_anonymous_auth" in vio_ids
+        assert "apiserver_insecure_port" in vio_ids
+        assert "apiserver_authz_not_rbac" in vio_ids
+        assert "apiserver_encryption_missing" in vio_ids
+        assert "apiserver_admission_missing" in vio_ids
+
+    def test_secure_apiserver(self, tmp_path):
+        """API server with secure flags produces no violations."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "kube-apiserver.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-apiserver
+spec:
+  containers:
+  - name: kube-apiserver
+    image: registry.k8s.io/kube-apiserver:v1.29.0
+    command:
+    - kube-apiserver
+    - --anonymous-auth=false
+    - --insecure-port=0
+    - --authorization-mode=Node,RBAC
+    - --encryption-provider-config=/etc/kubernetes/enc.yaml
+    - --enable-admission-plugins=NodeRestriction,PodSecurity
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        apiserver = [r for r in cp if r["resource"] == "kube-apiserver"]
+        assert len(apiserver) == 1
+        assert apiserver[0]["status"] == "clean"
+        assert apiserver[0]["violations"] == []
+
+
+class TestControlPlaneEtcd:
+    """Tests for etcd static pod manifest scanning."""
+
+    def test_etcd_no_tls(self, tmp_path):
+        """etcd without TLS produces violations."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "etcd.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: etcd
+spec:
+  containers:
+  - name: etcd
+    image: registry.k8s.io/etcd:3.5.10
+    command:
+    - etcd
+    - --auto-tls=true
+    - --listen-client-urls=http://0.0.0.0:2379
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        etcd = [r for r in cp if r["resource"] == "etcd"]
+        assert len(etcd) == 1
+        vio_ids = [v["id"] for v in etcd[0]["violations"]]
+        assert "etcd_client_cert_missing" in vio_ids
+        assert "etcd_client_key_missing" in vio_ids
+        assert "etcd_peer_cert_missing" in vio_ids
+        assert "etcd_peer_key_missing" in vio_ids
+        assert "etcd_client_auto_tls" in vio_ids
+
+
+class TestControlPlaneControllerManager:
+    """Tests for kube-controller-manager static pod manifest scanning."""
+
+    def test_cm_without_sa_key(self, tmp_path):
+        """Controller manager without SA key produces violations."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "kube-controller-manager.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-controller-manager
+spec:
+  containers:
+  - name: kube-controller-manager
+    image: registry.k8s.io/kube-controller-manager:v1.29.0
+    command:
+    - kube-controller-manager
+    - --leader-elect=true
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        cm = [r for r in cp if r["resource"] == "kube-controller-manager"]
+        assert len(cm) == 1
+        vio_ids = [v["id"] for v in cm[0]["violations"]]
+        assert "cm_sa_key_missing" in vio_ids
+        assert "cm_root_ca_missing" in vio_ids
+        assert "cm_sa_credentials_disabled" in vio_ids
+
+
+class TestRBACBindsAnonymous:
+    """Tests for ClusterRoleBinding to system:anonymous/unauthenticated."""
+
+    def test_binding_to_anonymous_user(self, tmp_path):
+        """Binding to system:anonymous triggers violation."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "anon-binding.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: anon-access
+subjects:
+- kind: User
+  name: system:anonymous
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "rbac_binds_anonymous" in vio_ids
+
+    def test_binding_to_unauthenticated_group(self, tmp_path):
+        """Binding to system:unauthenticated group triggers violation."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "unauth-binding.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: unauth-access
+subjects:
+- kind: Group
+  name: system:unauthenticated
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "rbac_binds_anonymous" in vio_ids
+
+    def test_binding_to_named_user_no_anonymous_flag(self, tmp_path):
+        """Binding to a regular user does not trigger anonymous flag."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "user-binding.yaml",
+            """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: user-access
+subjects:
+- kind: User
+  name: admin-user
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin
+  apiGroup: rbac.authorization.k8s.io
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "rbac_binds_anonymous" not in vio_ids
+
+
+class TestK3sControlPlaneArgs:
+    """Tests for K3s config.yaml with kube-apiserver-arg."""
+
+    def test_k3s_apiserver_args_insecure(self, tmp_path):
+        """K3s config with insecure apiserver args produces violations."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kube-apiserver-arg:
+  - "anonymous-auth=true"
+  - "authorization-mode=AlwaysAllow"
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        k3s_api = [r for r in cp if r["resource"] == "k3s-apiserver"]
+        assert len(k3s_api) == 1
+        vio_ids = [v["id"] for v in k3s_api[0]["violations"]]
+        assert "apiserver_anonymous_auth" in vio_ids
+        assert "apiserver_authz_not_rbac" in vio_ids

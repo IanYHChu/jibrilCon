@@ -85,6 +85,12 @@ _FIELD_TO_CONFIG_KEY = {
     "no_new_privs_missing": "lxc.no_new_privs",
     "seccomp_profile_missing": "lxc.seccomp.profile",
     "cap_keep_dangerous": "lxc.cap.keep",
+    "namespace_sharing_enabled": "lxc.namespace.share.*",
+    "namespace_keep_enabled": "lxc.namespace.keep",
+    "mount_auto_dangerous": "lxc.mount.auto",
+    "selinux_unconfined": "lxc.selinux.context",
+    "systemd_service_found": "systemd.service",
+    "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
 }
 
 # ---------------------------------------------------------------------
@@ -368,6 +374,55 @@ def _extract_cap_keep(entries: dict[str, list[str]]) -> dict[str, bool]:
     return {"cap_keep_dangerous": dangerous}
 
 
+def _extract_namespace_sharing(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check for explicit namespace sharing with other containers or host."""
+    share_keys = [
+        "lxc.namespace.share.net",
+        "lxc.namespace.share.ipc",
+        "lxc.namespace.share.pid",
+        "lxc.namespace.share.uts",
+        "lxc.namespace.share.mnt",
+        "lxc.namespace.share.user",
+    ]
+    has_sharing = any(entries.get(k) for k in share_keys)
+    return {"namespace_sharing_enabled": has_sharing}
+
+
+def _extract_namespace_keep(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if namespaces are explicitly kept (NOT isolated from host)."""
+    vals = entries.get("lxc.namespace.keep", [])
+    has_keep = any(isinstance(v, str) and v.strip() for v in vals)
+    return {"namespace_keep_enabled": has_keep}
+
+
+def _extract_mount_auto(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if lxc.mount.auto contains dangerous writable mounts."""
+    dangerous_patterns = {"proc:rw", "sys:rw", "cgroup:rw", "cgroup2:rw"}
+    vals = entries.get("lxc.mount.auto", [])
+    has_dangerous = False
+    for val in vals:
+        if not isinstance(val, str):
+            continue
+        # lxc.mount.auto values are space-separated tokens
+        tokens = val.strip().split()
+        if any(t in dangerous_patterns for t in tokens):
+            has_dangerous = True
+            break
+    return {"mount_auto_dangerous": has_dangerous}
+
+
+def _extract_selinux_context(entries: dict[str, list[str]]) -> dict[str, bool]:
+    """Check if SELinux context is explicitly set to unconfined."""
+    vals = entries.get("lxc.selinux.context", [])
+    if not vals:
+        # SELinux not configured -- AppArmor may be in use instead.
+        # Do not flag as unconfined.
+        return {"selinux_unconfined": False}
+    context = vals[-1].strip()
+    selinux_unconfined = not context or "unconfined" in context.lower()
+    return {"selinux_unconfined": selinux_unconfined}
+
+
 def _parse_mount_entry(entry: str) -> dict[str, str]:
     """
     Given a single ``lxc.mount.entry`` line, return mapping:
@@ -409,8 +464,17 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
     all_rules = rules_cfg.get("rules", [])
     if not all_rules:
         logger.warning("No rules loaded from %s; all containers will pass", RULE_PATH)
-    config_rules = [r for r in all_rules if not r["id"].startswith("mount_")]
-    mount_rules = [r for r in all_rules if r["id"].startswith("mount_")]
+    # Mount-entry rules operate on per-entry dicts (source/options fields);
+    # mount_auto_dangerous evaluates base_data so it belongs in config_rules.
+    _MOUNT_ENTRY_RULE_IDS = {
+        "mount_proc_dangerous",
+        "mount_sys_dangerous",
+        "mount_run_dangerous",
+        "mount_usr_should_be_ro",
+        "mount_dev_should_be_ro",
+    }
+    mount_rules = [r for r in all_rules if r["id"] in _MOUNT_ENTRY_RULE_IDS]
+    config_rules = [r for r in all_rules if r["id"] not in _MOUNT_ENTRY_RULE_IDS]
 
     results: list[dict[str, object]] = []
     alert_count = warning_count = total_containers = 0
@@ -454,6 +518,10 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
         privs_info = _extract_no_new_privs(entries)
         seccomp_info = _extract_seccomp_profile(entries)
         capkeep_info = _extract_cap_keep(entries)
+        ns_share_info = _extract_namespace_sharing(entries)
+        ns_keep_info = _extract_namespace_keep(entries)
+        mount_auto_info = _extract_mount_auto(entries)
+        selinux_info = _extract_selinux_context(entries)
 
         # infer runs_as_root from context or missing mappings
         systemd_root = context.is_systemd_started(
@@ -464,6 +532,14 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
         )
         runs_as_root = systemd_root or mapping_root
 
+        # Systemd service cross-validation (automotive: all containers
+        # MUST have a corresponding systemd service)
+        svc_meta = context.get_service_meta("lxc", container_name)
+        systemd_service_found = bool(svc_meta)
+        systemd_caps_unrestricted = systemd_service_found and not svc_meta.get(
+            "cap_bounding_set"
+        )
+
         base_data = {
             **idmap_info,
             **capdrop_info,
@@ -472,7 +548,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
             **privs_info,
             **seccomp_info,
             **capkeep_info,
+            **ns_share_info,
+            **ns_keep_info,
+            **mount_auto_info,
+            **selinux_info,
             "runs_as_root": runs_as_root,
+            "systemd_service_found": systemd_service_found,
+            "systemd_caps_unrestricted": systemd_caps_unrestricted,
         }
 
         # ------------------ config rules ------------------

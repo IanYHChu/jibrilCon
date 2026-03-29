@@ -12,6 +12,13 @@
         "cis_docker_benchmark": ["5.4"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 5.0,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -33,6 +40,13 @@
         "cis_docker_benchmark": ["5.3"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 2.0,
+          "type": "info"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -117,6 +131,13 @@
         "cis_docker_benchmark": ["5.5"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 4.5,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -138,6 +159,13 @@
         "cis_docker_benchmark": ["5.6"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 4.5,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -159,6 +187,13 @@
         "cis_docker_benchmark": ["5.7"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 4.0,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -180,6 +215,13 @@
         "cis_docker_benchmark": ["5.4"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 4.0,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -243,6 +285,13 @@
         "cis_docker_benchmark": ["5.5"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 5.0,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -285,6 +334,13 @@
         "cis_docker_benchmark": ["5.12"],
         "nist_800_190": ["4.4"]
       },
+      "severity_overrides": [
+        {
+          "condition": {"field": "runtime_mode", "operator": "equals", "value": "rootless"},
+          "severity": 4.5,
+          "type": "warning"
+        }
+      ],
       "logic": "and",
       "conditions": [
         {
@@ -312,6 +368,56 @@
           "field": "image_tag_latest",
           "operator": "equals",
           "value": true
+        }
+      ]
+    },
+    {
+      "id": "systemd_service_missing",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Container has no corresponding systemd service for automatic lifecycle management",
+      "risk": "In embedded/automotive environments all container services must be managed by systemd. A container without a systemd service will not auto-start at boot and has no supervised restart behavior.",
+      "remediation": "Create a systemd service unit file to manage the Docker container lifecycle (start, stop, restart).",
+      "references": {
+        "mitre_attack": ["T1053.002"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "systemd_service_found",
+          "operator": "equals",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "systemd_caps_unrestricted",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Systemd service does not restrict capabilities via CapabilityBoundingSet",
+      "risk": "Without CapabilityBoundingSet in the systemd unit, the Docker daemon inherits all capabilities from its parent process, increasing the blast radius if the daemon is compromised.",
+      "remediation": "Add 'CapabilityBoundingSet=' to the [Service] section of the systemd unit to restrict the daemon to only the capabilities it requires.",
+      "references": {
+        "mitre_attack": ["T1068"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "systemd_caps_unrestricted",
+          "operator": "equals",
+          "value": true
+        }
+      ],
+      "severity_overrides": [
+        {
+          "condition": {
+            "field": "runtime_mode",
+            "operator": "equals",
+            "value": "rootless"
+          },
+          "severity": 3.0
         }
       ]
     }

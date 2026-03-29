@@ -306,3 +306,141 @@ def test_invalid_regex_syntax_handled():
     rules = [_rule("regex_match", "x", r"[invalid")]
     result = evaluate_rules({"x": "test"}, rules)
     assert result == []
+
+
+# ------------------------------------------------------------------ #
+# Severity overrides
+# ------------------------------------------------------------------ #
+
+
+def test_severity_override_applied_when_condition_matches():
+    rules = [
+        {
+            "id": "priv",
+            "type": "alert",
+            "severity": 9.0,
+            "logic": "and",
+            "conditions": [
+                {"field": "privileged", "operator": "equals", "value": True}
+            ],
+            "severity_overrides": [
+                {
+                    "condition": {
+                        "field": "runtime_mode",
+                        "operator": "equals",
+                        "value": "rootless",
+                    },
+                    "severity": 5.0,
+                    "type": "warning",
+                }
+            ],
+        }
+    ]
+    # rootless -> override applies
+    result = evaluate_rules({"privileged": True, "runtime_mode": "rootless"}, rules)
+    assert len(result) == 1
+    assert result[0]["severity"] == 5.0
+    assert result[0]["type"] == "warning"
+
+
+def test_severity_override_not_applied_when_condition_mismatches():
+    rules = [
+        {
+            "id": "priv",
+            "type": "alert",
+            "severity": 9.0,
+            "logic": "and",
+            "conditions": [
+                {"field": "privileged", "operator": "equals", "value": True}
+            ],
+            "severity_overrides": [
+                {
+                    "condition": {
+                        "field": "runtime_mode",
+                        "operator": "equals",
+                        "value": "rootless",
+                    },
+                    "severity": 5.0,
+                }
+            ],
+        }
+    ]
+    # rootful -> override does NOT apply, keep original severity
+    result = evaluate_rules({"privileged": True, "runtime_mode": "rootful"}, rules)
+    assert len(result) == 1
+    assert result[0]["severity"] == 9.0
+    assert result[0]["type"] == "alert"
+
+
+def test_severity_override_first_match_wins():
+    rules = [
+        {
+            "id": "test",
+            "type": "alert",
+            "severity": 9.0,
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": True}],
+            "severity_overrides": [
+                {
+                    "condition": {
+                        "field": "mode",
+                        "operator": "equals",
+                        "value": "a",
+                    },
+                    "severity": 3.0,
+                },
+                {
+                    "condition": {
+                        "field": "mode",
+                        "operator": "equals",
+                        "value": "b",
+                    },
+                    "severity": 6.0,
+                },
+            ],
+        }
+    ]
+    result = evaluate_rules({"x": True, "mode": "b"}, rules)
+    assert result[0]["severity"] == 6.0
+
+
+def test_severity_override_empty_list_no_effect():
+    rules = [
+        {
+            "id": "test",
+            "type": "alert",
+            "severity": 9.0,
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": True}],
+            "severity_overrides": [],
+        }
+    ]
+    result = evaluate_rules({"x": True}, rules)
+    assert result[0]["severity"] == 9.0
+
+
+def test_severity_override_does_not_mutate_original_rules():
+    rules = [
+        {
+            "id": "test",
+            "type": "alert",
+            "severity": 9.0,
+            "logic": "and",
+            "conditions": [{"field": "x", "operator": "equals", "value": True}],
+            "severity_overrides": [
+                {
+                    "condition": {
+                        "field": "mode",
+                        "operator": "equals",
+                        "value": "rootless",
+                    },
+                    "severity": 4.0,
+                    "type": "warning",
+                }
+            ],
+        }
+    ]
+    evaluate_rules({"x": True, "mode": "rootless"}, rules)
+    # Original rule must remain untouched
+    assert rules[0]["severity"] == 9.0
+    assert rules[0]["type"] == "alert"

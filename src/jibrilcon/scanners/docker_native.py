@@ -94,6 +94,10 @@ _FIELD_TO_CONFIG_KEY = {
     "no_new_privileges_missing": "HostConfig.SecurityOpt",
     "mount_propagation_shared": "HostConfig.Binds",
     "image_tag_latest": "Config.Image",
+    "runtime_mode": "runtime_mode",
+    "systemd_service_found": "systemd.service",
+    "systemd_user": "systemd.User",
+    "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
 }
 
 
@@ -134,22 +138,27 @@ def _get_user_docker_roots(rootfs: str) -> list[str]:
     ]
 
 
-def _discover_container_dirs(rootfs: str) -> list[tuple[str, str, str]]:
+def _discover_container_dirs(rootfs: str) -> list[tuple[str, str, str, str]]:
     """
     Return a list of tuples:
 
-        (container_name, config_path, hostconfig_path)
+        (container_name, config_path, hostconfig_path, runtime_mode)
+
+    runtime_mode is "rootful" or "rootless".
     """
     try:
-        roots = [str(safe_join(rootfs, _get_docker_data_root(rootfs).lstrip("/")))]
+        data_root = _get_docker_data_root(rootfs).lstrip("/")
+        roots_rootful = [str(safe_join(rootfs, data_root))]
     except ValueError as exc:
         logger.warning("Skipping Docker data-root: %s", exc)
-        roots = []
-    roots += _get_user_docker_roots(rootfs)
+        roots_rootful = []
+    roots_rootless = _get_user_docker_roots(rootfs)
 
-    discovered: list[tuple[str, str, str]] = []
+    discovered: list[tuple[str, str, str, str]] = []
 
-    for base in roots:
+    for base, mode in [(r, "rootful") for r in roots_rootful] + [
+        (r, "rootless") for r in roots_rootless
+    ]:
         cont_dir = os.path.join(base, "containers")
         if not os.path.isdir(cont_dir):
             continue
@@ -168,7 +177,7 @@ def _discover_container_dirs(rootfs: str) -> list[tuple[str, str, str]]:
                 # try to read name from config
                 cfg_json = load_json_or_empty(cfg)
                 name = cfg_json.get("Name", "").lstrip("/") or name
-                discovered.append((name, cfg, host))
+                discovered.append((name, cfg, host, mode))
     return discovered
 
 
@@ -333,7 +342,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
-    for name, cfg_path, host_path in _discover_container_dirs(mount_path):
+    for name, cfg_path, host_path, runtime_mode in _discover_container_dirs(mount_path):
         # 1) load default config
         try:
             cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
@@ -372,9 +381,19 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         deep_merge(host_json, host_override)
 
         data = _extract_fields(cfg_json, host_json)
+        data["runtime_mode"] = runtime_mode
 
         # merge systemd inference: service_user_missing flag
         data["service_user_missing"] = context.is_user_missing(name)
+
+        # Systemd service cross-validation (automotive: all containers
+        # MUST have a corresponding systemd service)
+        svc_meta = context.get_service_meta("docker", name)
+        data["systemd_service_found"] = bool(svc_meta)
+        data["systemd_user"] = svc_meta.get("user", "")
+        data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
+            "cap_bounding_set"
+        )
 
         vios_raw = evaluate_rules(data, rules)
 

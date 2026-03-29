@@ -146,6 +146,46 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "kubelet_systemd_service_missing",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "Kubernetes daemon has no corresponding systemd service detected",
+      "risk": "In embedded/automotive environments the kubelet/k3s/rke2 daemon must be managed by systemd. Without a systemd service, the daemon has no supervised lifecycle management and will not auto-recover from crashes.",
+      "remediation": "Create a systemd service unit file for the Kubernetes daemon (kubelet/k3s/rke2).",
+      "references": {
+        "mitre_attack": ["T1053.002"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "systemd_service_found",
+          "operator": "equals",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "kubelet_systemd_caps_unrestricted",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "Kubernetes daemon systemd service does not restrict capabilities via CapabilityBoundingSet",
+      "risk": "Without CapabilityBoundingSet in the systemd unit, the kubelet/k3s/rke2 process inherits all capabilities. Restricting capabilities limits the blast radius if the daemon is compromised.",
+      "remediation": "Add 'CapabilityBoundingSet=' to the [Service] section of the kubelet/k3s/rke2 systemd unit to restrict capabilities.",
+      "references": {
+        "mitre_attack": ["T1068"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "systemd_caps_unrestricted",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

@@ -45,6 +45,8 @@ class ScanContext:
         self._user_missing: set[str] = set()
         # key: (engine, container) -> list of Exec* command lines
         self._exec_lines: dict[tuple[str, str], list[str]] = defaultdict(list)
+        # key: (engine, container) -> service metadata dict
+        self._service_meta: dict[tuple[str, str], dict[str, str]] = {}
         # init system detected in rootfs (set by core.run_scan)
         self.init_system: str | None = None
 
@@ -88,6 +90,27 @@ class ScanContext:
         """
         with self._lock:
             return list(self._exec_lines.get((engine, container_name), []))
+
+    def set_service_meta(
+        self, engine: str, container_name: str, meta: dict[str, str]
+    ) -> None:
+        """
+        Store systemd service metadata for *container_name* under *engine*.
+
+        Typical keys: ``user``, ``unit``, ``path``,
+        ``cap_bounding_set``, ``ambient_capabilities``.
+        """
+        with self._lock:
+            self._service_meta[(engine, container_name)] = dict(meta)
+
+    def get_service_meta(self, engine: str, container_name: str) -> dict[str, str]:
+        """
+        Return systemd service metadata for the given container,
+        or an empty dict if absent.
+        """
+        with self._lock:
+            stored = self._service_meta.get((engine, container_name))
+            return dict(stored) if stored else {}
 
     # -----------------------------------------------------------------
     # Accessors

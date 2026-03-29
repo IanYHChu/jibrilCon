@@ -99,6 +99,10 @@ _FIELD_TO_CONFIG_KEY = {
     "no_new_privileges_missing": "process.noNewPrivileges",
     "apparmor_disabled": "process.apparmorProfile",
     "mount_propagation_shared": "mounts[].options",
+    "runtime_mode": "runtime_mode",
+    "systemd_service_found": "systemd.service",
+    "systemd_user": "systemd.User",
+    "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
 }
 
 # ---------------------------------------------------------------------
@@ -135,20 +139,25 @@ def _get_user_podman_roots(rootfs: str) -> list[str]:
     ]
 
 
-def _discover_configs(rootfs: str) -> list[tuple[str, str]]:
+def _discover_configs(rootfs: str) -> list[tuple[str, str, str]]:
     """
-    Return list of *(container_name, config_path)* tuples.
+    Return list of *(container_name, config_path, runtime_mode)* tuples.
+
+    *runtime_mode* is ``"rootful"`` or ``"rootless"``.
     """
     try:
-        roots = [str(safe_join(rootfs, _get_podman_data_root(rootfs).lstrip("/")))]
+        data_root = _get_podman_data_root(rootfs).lstrip("/")
+        roots_rootful = [str(safe_join(rootfs, data_root))]
     except ValueError as exc:
         logger.warning("Skipping Podman data-root: %s", exc)
-        roots = []
-    roots += _get_user_podman_roots(rootfs)
+        roots_rootful = []
+    roots_rootless = _get_user_podman_roots(rootfs)
 
-    discovered: list[tuple[str, str]] = []
+    discovered: list[tuple[str, str, str]] = []
 
-    for base in roots:
+    for base, mode in [(r, "rootful") for r in roots_rootful] + [
+        (r, "rootless") for r in roots_rootless
+    ]:
         index_path = os.path.join(base, "overlay-containers", "containers.json")
         if not os.path.exists(index_path):
             continue
@@ -164,7 +173,7 @@ def _discover_configs(rootfs: str) -> list[tuple[str, str]]:
                 base, "overlay-containers", cid, "userdata", "config.json"
             )
             if os.path.exists(cfg_path):
-                discovered.append((name, cfg_path))
+                discovered.append((name, cfg_path, mode))
     return discovered
 
 
@@ -298,7 +307,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     warn_count = 0
     start_ts = time.time()
 
-    for name, cfg_path in _discover_configs(mount_path):
+    for name, cfg_path, runtime_mode in _discover_configs(mount_path):
         # 1) load default config
         try:
             cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
@@ -361,9 +370,19 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         )
 
         data = _extract_fields(cfg_json)
+        data["runtime_mode"] = runtime_mode
 
         # merge systemd inference: flag if service lacks non-root User=
         data["service_user_missing"] = context.is_user_missing(name)
+
+        # Systemd service cross-validation (automotive: all containers
+        # MUST have a corresponding systemd service)
+        svc_meta = context.get_service_meta("podman", name)
+        data["systemd_service_found"] = bool(svc_meta)
+        data["systemd_user"] = svc_meta.get("user", "")
+        data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
+            "cap_bounding_set"
+        )
 
         vios_raw = evaluate_rules(data, rules)
 

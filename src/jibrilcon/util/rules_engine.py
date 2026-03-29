@@ -221,9 +221,36 @@ def evaluate_rules(
     list[dict]
         All rules that matched; each element is the original rule dict.
         An empty list means the input passed without violations.
+
+    Severity overrides
+    ------------------
+    Rules may include a ``severity_overrides`` list.  Each entry carries a
+    single ``condition`` (same format as regular rule conditions) plus a
+    ``severity`` value and an optional ``type`` override.  After a rule
+    matches, the first override whose condition is satisfied by *data*
+    wins, replacing the rule's default severity (and type, if given).
     """
     output: list[dict[str, Any]] = []
     for rule in rules:
         if _evaluate_rule_group(data, rule):
-            output.append(copy.deepcopy(rule))
+            matched = copy.deepcopy(rule)
+            _apply_severity_overrides(data, matched)
+            output.append(matched)
     return output
+
+
+def _apply_severity_overrides(data: dict[str, Any], matched: dict[str, Any]) -> None:
+    """Mutate *matched* in-place if a severity override condition is met."""
+    overrides = matched.get("severity_overrides")
+    if not overrides:
+        return
+    for override in overrides:
+        cond = override.get("condition")
+        if not cond:
+            continue
+        if _match_condition(data, cond):
+            if "severity" in override:
+                matched["severity"] = override["severity"]
+            if "type" in override:
+                matched["type"] = override["type"]
+            break  # first matching override wins

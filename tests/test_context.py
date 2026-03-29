@@ -56,3 +56,32 @@ def test_init_system_settable():
     ctx = ScanContext()
     ctx.init_system = "systemd"
     assert ctx.init_system == "systemd"
+
+
+def test_service_meta_round_trip():
+    ctx = ScanContext()
+    meta = {
+        "user": "admin",
+        "unit": "docker.service",
+        "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+    }
+    ctx.set_service_meta("docker", "web01", meta)
+    got = ctx.get_service_meta("docker", "web01")
+    assert got == meta
+    # Must be a copy
+    assert got is not meta
+    got["user"] = "hacked"
+    assert ctx.get_service_meta("docker", "web01")["user"] == "admin"
+
+
+def test_service_meta_missing_returns_empty():
+    ctx = ScanContext()
+    assert ctx.get_service_meta("docker", "nonexistent") == {}
+
+
+def test_service_meta_per_engine():
+    ctx = ScanContext()
+    ctx.set_service_meta("docker", "app", {"user": "root"})
+    ctx.set_service_meta("podman", "app", {"user": "admin"})
+    assert ctx.get_service_meta("docker", "app")["user"] == "root"
+    assert ctx.get_service_meta("podman", "app")["user"] == "admin"

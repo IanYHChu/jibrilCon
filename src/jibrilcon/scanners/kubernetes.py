@@ -61,6 +61,9 @@ RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_pod_rules.json"
 RBAC_RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_rbac_rules.json"
 INFRA_RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_infra_rules.json"
 NODE_RULE_PATH = BASE_DIR.parent / "rules" / "kubernetes_node_rules.json"
+CONTROLPLANE_RULE_PATH = (
+    BASE_DIR.parent / "rules" / "kubernetes_controlplane_rules.json"
+)
 CONFIG_PATH = BASE_DIR.parent / "config" / "kubernetes.json"
 
 _DANGEROUS_CAPS = frozenset(
@@ -568,6 +571,7 @@ def _extract_rbac_role_fields(doc: dict[str, Any]) -> dict[str, Any]:
         "has_nodes_proxy": has_nodes_proxy,
         "has_sa_token_create": has_sa_token_create,
         "binds_default_sa": False,
+        "binds_anonymous": False,
     }
 
 
@@ -584,6 +588,18 @@ def _extract_rbac_binding_fields(doc: dict[str, Any]) -> dict[str, Any]:
         for s in subjects
     )
 
+    binds_anonymous = any(
+        isinstance(s, dict)
+        and (
+            (s.get("kind") == "User" and s.get("name") == "system:anonymous")
+            or (
+                s.get("kind") == "Group"
+                and s.get("name") in ("system:unauthenticated", "system:anonymous")
+            )
+        )
+        for s in subjects
+    )
+
     return {
         "has_wildcard_verbs": False,
         "has_wildcard_resources": False,
@@ -594,6 +610,7 @@ def _extract_rbac_binding_fields(doc: dict[str, Any]) -> dict[str, Any]:
         "has_nodes_proxy": False,
         "has_sa_token_create": False,  # nosec B105
         "binds_default_sa": binds_default_sa,
+        "binds_anonymous": binds_anonymous,
     }
 
 
@@ -608,6 +625,7 @@ _RBAC_FIELD_TO_KEY = {
     "has_nodes_proxy": "rules[].resources (nodes/proxy)",
     "has_sa_token_create": "rules[].resources (serviceaccounts/token)",  # nosec B105
     "binds_default_sa": "subjects[].name (default)",
+    "binds_anonymous": "subjects[].name (system:anonymous/unauthenticated)",
 }
 
 
@@ -681,6 +699,12 @@ _NODE_CONFIG_PATHS: dict[str, list[str]] = {
     "kubeadm": ["/var/lib/kubelet/config.yaml"],
     "k3s": ["/etc/rancher/k3s/config.yaml"],
     "rke2": ["/etc/rancher/rke2/config.yaml"],
+}
+
+_CONTROL_PLANE_MANIFESTS = {
+    "kube-apiserver": "etc/kubernetes/manifests/kube-apiserver.yaml",
+    "etcd": "etc/kubernetes/manifests/etcd.yaml",
+    "kube-controller-manager": "etc/kubernetes/manifests/kube-controller-manager.yaml",
 }
 
 
@@ -835,6 +859,95 @@ _NODE_FIELD_TO_KEY = {
     "streaming_timeout_disabled": "streamingConnectionIdleTimeout",
     "event_record_qps_disabled": "eventRecordQPS",
     "tls_cert_missing": "tlsCertFile / rotateCertificates",
+    "systemd_service_found": "systemd.service",
+    "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
+}
+
+
+# ---------------------------------------------------------------------
+# Control plane component field extraction
+# ---------------------------------------------------------------------
+
+
+def _parse_component_args(doc: dict[str, Any]) -> dict[str, str]:
+    """Parse command-line arguments from a static pod manifest."""
+    containers = (doc.get("spec") or {}).get("containers") or []
+    if not containers:
+        return {}
+    # Use the first container (control plane pods have one container)
+    container = containers[0]
+    args = list(container.get("command") or [])
+    args.extend(container.get("args") or [])
+
+    parsed: dict[str, str] = {}
+    for arg in args:
+        if not isinstance(arg, str):
+            continue
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            parsed[k.lstrip("-")] = v
+        elif arg.startswith("--"):
+            parsed[arg.lstrip("-")] = "true"
+    return parsed
+
+
+def _extract_apiserver_fields(args: dict[str, str]) -> dict[str, Any]:
+    """Extract security fields from kube-apiserver arguments."""
+    return {
+        "apiserver_anonymous_auth": args.get("anonymous-auth", "") == "true",
+        "apiserver_insecure_port": (args.get("insecure-port", "0") != "0"),
+        "apiserver_authz_not_rbac": (
+            "RBAC" not in args.get("authorization-mode", "RBAC")
+        ),
+        "apiserver_encryption_missing": not args.get("encryption-provider-config"),
+        "apiserver_admission_missing": not args.get("enable-admission-plugins"),
+    }
+
+
+def _extract_etcd_fields(args: dict[str, str]) -> dict[str, Any]:
+    """Extract security fields from etcd arguments."""
+    return {
+        "etcd_client_cert_missing": not args.get("cert-file"),
+        "etcd_client_key_missing": not args.get("key-file"),
+        "etcd_peer_cert_missing": not args.get("peer-cert-file"),
+        "etcd_peer_key_missing": not args.get("peer-key-file"),
+        "etcd_client_auto_tls": args.get("auto-tls", "") == "true",
+    }
+
+
+def _extract_controller_manager_fields(
+    args: dict[str, str],
+) -> dict[str, Any]:
+    """Extract security fields from kube-controller-manager arguments."""
+    return {
+        "cm_sa_key_missing": not args.get("service-account-private-key-file"),
+        "cm_root_ca_missing": not args.get("root-ca-file"),
+        "cm_sa_credentials_disabled": (
+            args.get("use-service-account-credentials", "") != "true"
+        ),
+    }
+
+
+_APISERVER_FIELD_TO_KEY = {
+    "apiserver_anonymous_auth": "--anonymous-auth",
+    "apiserver_insecure_port": "--insecure-port",
+    "apiserver_authz_not_rbac": "--authorization-mode",
+    "apiserver_encryption_missing": "--encryption-provider-config",
+    "apiserver_admission_missing": "--enable-admission-plugins",
+}
+
+_ETCD_FIELD_TO_KEY = {
+    "etcd_client_cert_missing": "--cert-file",
+    "etcd_client_key_missing": "--key-file",
+    "etcd_peer_cert_missing": "--peer-cert-file",
+    "etcd_peer_key_missing": "--peer-key-file",
+    "etcd_client_auto_tls": "--auto-tls",
+}
+
+_CM_FIELD_TO_KEY = {
+    "cm_sa_key_missing": "--service-account-private-key-file",
+    "cm_root_ca_missing": "--root-ca-file",
+    "cm_sa_credentials_disabled": "--use-service-account-credentials",
 }
 
 
@@ -856,6 +969,30 @@ def _discover_manifests(rootfs: str) -> list[str]:
                 if ext in _MANIFEST_EXTENSIONS:
                     files.append(os.path.join(dirpath, fname))
     return files
+
+
+# ---------------------------------------------------------------------
+# Systemd daemon service lookup
+# ---------------------------------------------------------------------
+
+
+def _get_daemon_service_meta(context: ScanContext, distro: str) -> dict[str, str]:
+    """Find systemd service metadata for the K8s daemon by distro.
+
+    Maps the detected K8s distribution to the engine/container pairs
+    registered by ``systemd_unit_parser`` and returns the first match.
+    """
+    # Map distro to (engine, candidate container names)
+    candidates: dict[str, list[tuple[str, str]]] = {
+        "k3s": [("k3s", "server"), ("k3s", "agent")],
+        "rke2": [("rke2", "server"), ("rke2", "agent")],
+        "kubeadm": [("kubernetes", "")],
+    }
+    for engine, cname in candidates.get(distro, []):
+        meta = context.get_service_meta(engine, cname)
+        if meta:
+            return meta
+    return {}
 
 
 # ---------------------------------------------------------------------
@@ -894,6 +1031,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     rbac_rules = _load_rules(RBAC_RULE_PATH)
     infra_rules = _load_rules(INFRA_RULE_PATH)
     node_rules = _load_rules(NODE_RULE_PATH)
+    cp_rules = _load_rules(CONTROLPLANE_RULE_PATH)
 
     # Load dangerous hostpath list from config
     try:
@@ -1087,6 +1225,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             else:
                 data = _extract_k3s_rke2_fields(cfg)
 
+            # Systemd daemon service cross-validation
+            svc_meta = _get_daemon_service_meta(context, distro)
+            data["systemd_service_found"] = bool(svc_meta)
+            data["systemd_caps_unrestricted"] = bool(svc_meta) and not svc_meta.get(
+                "cap_bounding_set"
+            )
+
             key = f"NodeConfig/{distro}"
             vios_raw = evaluate_rules(data, node_rules)
 
@@ -1114,6 +1259,145 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                 "violations": vios,
                 "status": status,
             }
+
+    # --- Control plane component scanning ---
+    if cp_rules:
+        # Static pod manifests (kubeadm)
+        for component, rel_path in _CONTROL_PLANE_MANIFESTS.items():
+            try:
+                full_path = str(safe_join(mount_path, rel_path))
+            except ValueError:
+                continue
+            if not os.path.isfile(full_path):
+                continue
+
+            docs = _load_manifests(full_path)
+            for doc in docs:
+                args = _parse_component_args(doc)
+                if not args:
+                    continue
+
+                if component == "kube-apiserver":
+                    data = _extract_apiserver_fields(args)
+                    field_map = _APISERVER_FIELD_TO_KEY
+                elif component == "etcd":
+                    data = _extract_etcd_fields(args)
+                    field_map = _ETCD_FIELD_TO_KEY
+                elif component == "kube-controller-manager":
+                    data = _extract_controller_manager_fields(args)
+                    field_map = _CM_FIELD_TO_KEY
+                else:
+                    continue
+
+                key = f"ControlPlane/{component}"
+                vios_raw = evaluate_rules(data, cp_rules)
+
+                def _resolve_cp(_v, used_fields, _d=data, _m=field_map):
+                    lines = []
+                    for f in used_fields:
+                        mk = _m.get(f, f)
+                        val = _d.get(f)
+                        if val is not None:
+                            lines.append(f"{mk} = {val}")
+                        else:
+                            lines.append(f"<missing> {mk}")
+                    return lines
+
+                vios = process_violations(vios_raw, full_path, mount_path, _resolve_cp)
+                status = "violated" if vios else "clean"
+                if any(v["type"] == "alert" for v in vios):
+                    alert_count += 1
+                elif any(v["type"] == "warning" for v in vios):
+                    warn_count += 1
+                results_map[key] = {
+                    "kind": "ControlPlane",
+                    "resource": component,
+                    "container": "",
+                    "violations": vios,
+                    "status": status,
+                }
+
+        # K3s/RKE2: extract apiserver/controller-manager args from config.yaml
+        for distro, cfg_path in _discover_node_configs(mount_path):
+            if distro not in ("k3s", "rke2"):
+                continue
+            cfg = _load_yaml_config(cfg_path)
+            if not cfg:
+                continue
+
+            # kube-apiserver-arg
+            apiserver_args_raw = cfg.get("kube-apiserver-arg") or []
+            if isinstance(apiserver_args_raw, str):
+                apiserver_args_raw = [apiserver_args_raw]
+            if apiserver_args_raw:
+                aargs: dict[str, str] = {}
+                for arg in apiserver_args_raw:
+                    if isinstance(arg, str) and "=" in arg:
+                        k, v = arg.split("=", 1)
+                        aargs[k.lstrip("-")] = v
+                data = _extract_apiserver_fields(aargs)
+                key = f"ControlPlane/{distro}-apiserver"
+                vios_raw = evaluate_rules(data, cp_rules)
+
+                def _resolve_cp_k3s(_v, used_fields, _d=data):
+                    return [
+                        f"{_APISERVER_FIELD_TO_KEY.get(f, f)} = {_d.get(f)}"
+                        for f in used_fields
+                    ]
+
+                vios = process_violations(
+                    vios_raw, cfg_path, mount_path, _resolve_cp_k3s
+                )
+                if vios:
+                    status = "violated"
+                    if any(v["type"] == "alert" for v in vios):
+                        alert_count += 1
+                    elif any(v["type"] == "warning" for v in vios):
+                        warn_count += 1
+                    results_map[key] = {
+                        "kind": "ControlPlane",
+                        "resource": f"{distro}-apiserver",
+                        "container": "",
+                        "violations": vios,
+                        "status": status,
+                    }
+
+            # kube-controller-manager-arg
+            cm_args_raw = cfg.get("kube-controller-manager-arg") or []
+            if isinstance(cm_args_raw, str):
+                cm_args_raw = [cm_args_raw]
+            if cm_args_raw:
+                cargs: dict[str, str] = {}
+                for arg in cm_args_raw:
+                    if isinstance(arg, str) and "=" in arg:
+                        k, v = arg.split("=", 1)
+                        cargs[k.lstrip("-")] = v
+                data = _extract_controller_manager_fields(cargs)
+                key = f"ControlPlane/{distro}-controller-manager"
+                vios_raw = evaluate_rules(data, cp_rules)
+
+                def _resolve_cp_cm(_v, used_fields, _d=data):
+                    return [
+                        f"{_CM_FIELD_TO_KEY.get(f, f)} = {_d.get(f)}"
+                        for f in used_fields
+                    ]
+
+                vios = process_violations(
+                    vios_raw, cfg_path, mount_path, _resolve_cp_cm
+                )
+                if vios:
+                    status = "violated"
+                    if any(v["type"] == "alert" for v in vios):
+                        alert_count += 1
+                    elif any(v["type"] == "warning" for v in vios):
+                        warn_count += 1
+                    results_map[key] = {
+                        "kind": "ControlPlane",
+                        "resource": f"{distro}-controller-manager",
+                        "container": "",
+                        "violations": vios,
+                        "status": status,
+                    }
 
     summary = {
         "kubernetes_scanned": len(results_map),

@@ -27,6 +27,17 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.set_service_meta(
+            "docker",
+            "clean",
+            {
+                "user": "dockeruser",
+                "unit": "docker-clean.service",
+                "path": "etc/systemd/system/docker-clean.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
         result = docker_native.scan(r.path, context=ctx)
         assert result["scanner"] == "docker"
         assert result["summary"]["docker_scanned"] == 1
@@ -203,6 +214,17 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.set_service_meta(
+            "docker",
+            "roextra",
+            {
+                "user": "dockeruser",
+                "unit": "docker-roextra.service",
+                "path": "etc/systemd/system/docker-roextra.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
         result = docker_native.scan(r.path, context=ctx)
         containers = result["results"]
         assert len(containers) == 1
@@ -484,6 +506,17 @@ class TestDockerScanner:
             },
         )
         ctx = _make_context()
+        ctx.set_service_meta(
+            "docker",
+            "hardened",
+            {
+                "user": "dockeruser",
+                "unit": "docker-hardened.service",
+                "path": "etc/systemd/system/docker-hardened.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
         result = docker_native.scan(r.path, context=ctx)
         containers = result["results"]
         assert len(containers) == 1
@@ -588,6 +621,126 @@ class TestDockerScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "image_tag_latest" not in vio_ids
 
+    def test_rootless_privileged_has_reduced_severity(self, make_rootfs):
+        """Rootless Docker privileged container should have lower severity."""
+        r = make_rootfs
+        # Create a rootless container by placing it under a user's home
+        r.add_passwd(["testuser:x:1000:1000:Test:/home/testuser:/bin/bash"])
+        cid = "ccc" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/rootless_priv"},
+            hostconfig={"Privileged": True, "ReadonlyRootfs": False, "Binds": []},
+            data_root="/home/testuser/.local/share/docker",
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        priv_vio = [v for v in containers[0]["violations"] if v["id"] == "privileged"]
+        assert len(priv_vio) == 1
+        assert priv_vio[0]["severity"] == 5.0
+        assert priv_vio[0]["type"] == "warning"
+
+    def test_rootful_privileged_keeps_full_severity(self, make_rootfs):
+        """Rootful Docker privileged container keeps original high severity."""
+        r = make_rootfs
+        cid = "ddd" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/rootful_priv"},
+            hostconfig={"Privileged": True, "ReadonlyRootfs": False, "Binds": []},
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        priv_vio = [v for v in containers[0]["violations"] if v["id"] == "privileged"]
+        assert len(priv_vio) == 1
+        assert priv_vio[0]["severity"] == 9.0
+        assert priv_vio[0]["type"] == "alert"
+
+    def test_systemd_service_missing_detected(self, make_rootfs):
+        """Container without systemd service should trigger alert."""
+        r = make_rootfs
+        cid = "eee" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/orphan"},
+            hostconfig={"Privileged": False, "ReadonlyRootfs": True, "Binds": []},
+        )
+        # No systemd service -> context has no service_meta for this container
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_service_missing" in vio_ids
+
+    def test_systemd_caps_unrestricted_detected(self, make_rootfs):
+        """Systemd service without CapabilityBoundingSet should trigger warning."""
+        r = make_rootfs
+        cid = "fff" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/nocaps"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+            },
+        )
+        ctx = _make_context()
+        # Register service meta WITHOUT cap_bounding_set
+        ctx.set_service_meta(
+            "docker",
+            "nocaps",
+            {
+                "user": "dockeruser",
+                "unit": "docker-nocaps.service",
+                "path": "etc/systemd/system/docker-nocaps.service",
+                "cap_bounding_set": "",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_caps_unrestricted" in vio_ids
+        # systemd_service_missing should NOT be in violations
+        assert "systemd_service_missing" not in vio_ids
+
+    def test_systemd_with_caps_not_flagged(self, make_rootfs):
+        """Systemd service WITH CapabilityBoundingSet should NOT trigger."""
+        r = make_rootfs
+        cid = "ggg" * 8 + "0" * 40
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/withcaps"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+            },
+        )
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "docker",
+            "withcaps",
+            {
+                "user": "dockeruser",
+                "unit": "docker-withcaps.service",
+                "path": "etc/systemd/system/docker-withcaps.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE CAP_CHOWN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_caps_unrestricted" not in vio_ids
+        assert "systemd_service_missing" not in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # Podman scanner
@@ -649,6 +802,17 @@ class TestPodmanScanner:
             },
         )
         ctx = _make_context()
+        ctx.set_service_meta(
+            "podman",
+            "safepod",
+            {
+                "user": "podmanuser",
+                "unit": "podman-safepod.service",
+                "path": "etc/systemd/system/podman-safepod.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
         result = podman.scan(r.path, context=ctx)
         safepod = [c for c in result["results"] if c["container"] == "safepod"]
         assert len(safepod) == 1
@@ -1209,6 +1373,168 @@ class TestPodmanScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "mount_propagation_shared" in vio_ids
 
+    def test_rootless_uid0_has_reduced_severity(self, make_rootfs):
+        """Rootless Podman UID 0 should have lower severity than rootful."""
+        r = make_rootfs
+        r.add_passwd(["testuser:x:1000:1000:Test:/home/testuser:/bin/bash"])
+        cid = "aaa" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "rootless_test",
+            {
+                "process": {"user": {"uid": 0}},
+                "root": {"readonly": False},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                },
+            },
+            storage_root="/home/testuser/.local/share/containers/storage",
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        uid_vio = [v for v in containers[0]["violations"] if v["id"] == "runs_as_root"]
+        assert len(uid_vio) == 1
+        assert uid_vio[0]["severity"] == 2.0
+        assert uid_vio[0]["type"] == "info"
+
+    def test_rootful_uid0_keeps_full_severity(self, make_rootfs):
+        """Rootful Podman UID 0 keeps original high severity."""
+        r = make_rootfs
+        cid = "bbb" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "rootful_test",
+            {
+                "process": {"user": {"uid": 0}},
+                "root": {"readonly": False},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        uid_vio = [v for v in containers[0]["violations"] if v["id"] == "runs_as_root"]
+        assert len(uid_vio) == 1
+        assert uid_vio[0]["severity"] == 7.0
+        assert uid_vio[0]["type"] == "alert"
+
+    def test_systemd_service_missing_detected(self, make_rootfs):
+        """Container without systemd service should trigger alert."""
+        r = make_rootfs
+        cid = "eee" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "orphan_podman",
+            {
+                "process": {"user": {"uid": 1000}},
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ]
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_service_missing" in vio_ids
+
+    def test_systemd_caps_unrestricted_detected(self, make_rootfs):
+        """Systemd service without CapabilityBoundingSet should trigger warning."""
+        r = make_rootfs
+        cid = "fff" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "nocaps_podman",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "podman",
+            "nocaps_podman",
+            {
+                "user": "podmanuser",
+                "unit": "podman-nocaps.service",
+                "path": "etc/systemd/system/podman-nocaps.service",
+                "cap_bounding_set": "",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_caps_unrestricted" in vio_ids
+        assert "systemd_service_missing" not in vio_ids
+
+    def test_systemd_with_caps_not_flagged(self, make_rootfs):
+        """Systemd service WITH CapabilityBoundingSet should NOT trigger."""
+        r = make_rootfs
+        cid = "ggg" * 8 + "f" * 40
+        r.add_podman_container(
+            cid,
+            "withcaps_podman",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                },
+                "root": {"readonly": True},
+                "linux": {
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "seccompProfilePath": "/etc/seccomp/default.json",
+                },
+            },
+        )
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "podman",
+            "withcaps_podman",
+            {
+                "user": "podmanuser",
+                "unit": "podman-withcaps.service",
+                "path": "etc/systemd/system/podman-withcaps.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_caps_unrestricted" not in vio_ids
+        assert "systemd_service_missing" not in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # LXC scanner
@@ -1252,6 +1578,18 @@ class TestLxcScanner:
         r = make_rootfs
         r.add_lxc_config("clean", self._CLEAN_CONFIG)
         ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "clean",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-clean.service",
+                "path": "etc/systemd/system/lxc-clean.service",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "clean")
         result = lxc.scan(r.path, context=ctx)
 
         assert result["scanner"] == "lxc"
@@ -1621,6 +1959,263 @@ class TestLxcScanner:
         result = lxc.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "cap_keep_dangerous" not in vio_ids
+
+    def test_systemd_service_missing_detected(self, make_rootfs):
+        """LXC container without systemd service should trigger alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/orphan/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.no_new_privs = 1\n"
+            "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+            "lxc.apparmor.profile = lxc-container-default\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("orphan", config)
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_service_missing" in vio_ids
+
+    def test_systemd_caps_unrestricted_detected(self, make_rootfs):
+        """LXC container with systemd service but no CapabilityBoundingSet."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nocaps/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.no_new_privs = 1\n"
+            "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+            "lxc.apparmor.profile = lxc-container-default\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("nocaps", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nocaps",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nocaps.service",
+                "path": "etc/systemd/system/lxc-nocaps.service",
+                "cap_bounding_set": "",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "nocaps")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_caps_unrestricted" in vio_ids
+        assert "systemd_service_missing" not in vio_ids
+
+    def test_systemd_with_caps_not_flagged(self, make_rootfs):
+        """LXC container with properly configured systemd service."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/good/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.no_new_privs = 1\n"
+            "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+            "lxc.apparmor.profile = lxc-container-default\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("good", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "good",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-good.service",
+                "path": "etc/systemd/system/lxc-good.service",
+                "cap_bounding_set": "CAP_NET_ADMIN CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        ctx.mark_systemd_started("lxc", "good")
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "systemd_caps_unrestricted" not in vio_ids
+        assert "systemd_service_missing" not in vio_ids
+
+    def test_namespace_sharing_detected(self, make_rootfs):
+        """Namespace sharing should trigger critical alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nsshare/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.namespace.share.net = other_container\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("nsshare", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nsshare",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nsshare.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "namespace_sharing_enabled" in vio_ids
+
+    def test_namespace_keep_detected(self, make_rootfs):
+        """Namespace keep should trigger critical alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/nskeep/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.namespace.keep = net\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("nskeep", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "nskeep",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-nskeep.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "namespace_keep_enabled" in vio_ids
+
+    def test_mount_auto_dangerous_detected(self, make_rootfs):
+        """Dangerous lxc.mount.auto should trigger alert."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/mntauto/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.mount.auto = proc:rw sys:rw\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("mntauto", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "mntauto",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-mntauto.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_auto_dangerous" in vio_ids
+
+    def test_mount_auto_safe_not_flagged(self, make_rootfs):
+        """Safe lxc.mount.auto (proc:mixed, sys:ro) should NOT trigger."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/mntsafe/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.mount.auto = proc:mixed sys:ro\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.no_new_privs = 1\n"
+            "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+            "lxc.apparmor.profile = lxc-container-default\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("mntsafe", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "mntsafe",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-mntsafe.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_auto_dangerous" not in vio_ids
+
+    def test_selinux_unconfined_detected(self, make_rootfs):
+        """Unconfined SELinux context should trigger warning."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/selinux/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.selinux.context = unconfined_u:unconfined_r:unconfined_t:s0\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("selinux", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "selinux",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-selinux.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "selinux_unconfined" in vio_ids
+
+    def test_selinux_confined_not_flagged(self, make_rootfs):
+        """Confined SELinux context should NOT trigger."""
+        r = make_rootfs
+        config = (
+            "lxc.rootfs.path = /var/lib/lxc/selinuxok/rootfs\n"
+            "lxc.idmap = u 0 100000 65536\n"
+            "lxc.idmap = g 0 100000 65536\n"
+            "lxc.selinux.context = system_u:system_r:lxc_t:s0\n"
+            "lxc.cap.drop = sys_admin\n"
+            "lxc.no_new_privs = 1\n"
+            "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+            "lxc.apparmor.profile = lxc-container-default\n"
+            "lxc.net.0.type = veth\n"
+        )
+        r.add_lxc_config("selinuxok", config)
+        ctx = _make_context()
+        ctx.set_service_meta(
+            "lxc",
+            "selinuxok",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-selinuxok.service",
+                "path": "",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "selinux_unconfined" not in vio_ids
 
 
 # ------------------------------------------------------------------ #

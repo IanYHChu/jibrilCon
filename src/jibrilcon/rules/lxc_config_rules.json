@@ -330,6 +330,126 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "namespace_sharing_enabled",
+      "type": "alert",
+      "severity": 9.5,
+      "description": "Container shares namespaces with other containers or host via lxc.namespace.share.*",
+      "risk": "Explicit namespace sharing completely bypasses container isolation for the shared namespace. A container sharing PID namespace can signal or ptrace processes in the target; sharing network namespace exposes the target's network stack.",
+      "remediation": "Remove all lxc.namespace.share.* directives. Use network bridges or explicit IPC mechanisms instead of namespace sharing.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "namespace_sharing_enabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "namespace_keep_enabled",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "Container keeps host namespaces via lxc.namespace.keep (isolation bypassed)",
+      "risk": "lxc.namespace.keep prevents the container from creating its own namespaces for the specified types. The container shares the host's namespace directly, breaking isolation completely for those resources.",
+      "remediation": "Remove lxc.namespace.keep directive. Allow LXC to create isolated namespaces for the container.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "namespace_keep_enabled",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "mount_auto_dangerous",
+      "type": "alert",
+      "severity": 9.0,
+      "description": "lxc.mount.auto contains dangerous writable mounts (proc:rw, sys:rw, or cgroup:rw)",
+      "risk": "Writable auto-mounts of /proc, /sys, or cgroups enable direct kernel parameter modification and cgroup escape. An attacker can write to /proc/sys to disable security mitigations or manipulate cgroups to break out of the container.",
+      "remediation": "Change lxc.mount.auto to use read-only variants (e.g., 'proc:mixed' instead of 'proc:rw', 'sys:ro' instead of 'sys:rw'). Never mount cgroups as writable.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "mount_auto_dangerous",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "selinux_unconfined",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "SELinux context is unconfined or not configured",
+      "risk": "Without a proper SELinux context, the container process has no mandatory access control restrictions. On SELinux-enforcing systems, an unconfined container can access any resource permitted by DAC alone.",
+      "remediation": "Set 'lxc.selinux.context' to a confined type (e.g., 'system_u:system_r:lxc_t:s0'). Avoid 'unconfined_t' or empty values.",
+      "references": {
+        "mitre_attack": ["T1611"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "selinux_unconfined",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "systemd_service_missing",
+      "type": "alert",
+      "severity": 7.0,
+      "description": "LXC container has no corresponding systemd service for automatic lifecycle management",
+      "risk": "In embedded/automotive environments all container services must be managed by systemd. A container without a systemd service will not auto-start at boot and has no supervised restart behavior.",
+      "remediation": "Create a systemd service unit file with 'ExecStart=/usr/bin/lxc-start -n <container_name>' to manage the LXC container lifecycle.",
+      "references": {
+        "mitre_attack": ["T1053.002"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "systemd_service_found",
+          "operator": "equals",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "systemd_caps_unrestricted",
+      "type": "warning",
+      "severity": 6.0,
+      "description": "Systemd service does not restrict capabilities via CapabilityBoundingSet",
+      "risk": "Without CapabilityBoundingSet in the systemd unit, the lxc-start process inherits all capabilities from its parent, increasing the blast radius if the container is compromised.",
+      "remediation": "Add 'CapabilityBoundingSet=' to the [Service] section of the systemd unit to restrict the daemon to only the capabilities it requires.",
+      "references": {
+        "mitre_attack": ["T1068"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "systemd_caps_unrestricted",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

@@ -120,6 +120,16 @@ def scan_systemd_container_units(
     rootfs = Path(rootfs)
     unit_dirs = [rootfs / d.lstrip("/") for d in unit_dirs_raw]
 
+    # Discover user-scope systemd unit directories for rootless daemons
+    user_suffix = cfg.get("user_unit_dir_suffix", "")
+    if user_suffix:
+        from jibrilcon.util.passwd_utils import get_user_home_dirs
+
+        for home_abs in get_user_home_dirs(str(rootfs)):
+            user_unit_dir = Path(home_abs) / user_suffix
+            if user_unit_dir not in unit_dirs:
+                unit_dirs.append(user_unit_dir)
+
     exec_keys: list[str] = cfg.get("exec_keys", ["ExecStart", "ExecStartPre"])
 
     rows: list[dict[str, Any]] = []
@@ -220,6 +230,20 @@ def collect_systemd_containers(
                 all_exec.extend(lines)
         if all_exec:
             ctx.add_exec_lines(engine, cname, all_exec)
+
+        # --- cache service metadata for scanner cross-validation ------
+        fields = row.get("fields", {})
+        ctx.set_service_meta(
+            engine,
+            cname,
+            {
+                "user": user,
+                "unit": row.get("unit", ""),
+                "path": row.get("path", ""),
+                "cap_bounding_set": fields.get("capabilityboundingset", ""),
+                "ambient_capabilities": fields.get("ambientcapabilities", ""),
+            },
+        )
 
         # Development-time information
         logger.info(
