@@ -296,3 +296,37 @@ class TestScannerLoaderNarrowedExceptions:
 
         assert len(results) == 1
         assert results[0]["scanner"] == "ok"
+
+
+# ------------------------------------------------------------------ #
+# LXC _parse_mount_entry with = in options
+# ------------------------------------------------------------------ #
+
+
+class TestLxcParseMountEntry:
+    def test_mount_entry_with_equals_in_options(self):
+        """Mount entries with = in options should parse correctly."""
+        from jibrilcon.scanners.lxc import _parse_mount_entry
+
+        entry = "mqueue dev/mqueue mqueue rw,relatime,create=dir,optional 0 0"
+        result = _parse_mount_entry(entry)
+        assert result["source"] == "mqueue"
+        assert "create=dir" in result["options"]
+
+    def test_mount_entry_dangerous_options(self):
+        """Mount entries with dangerous options should be detected."""
+        from jibrilcon.scanners.lxc import _parse_mount_entry
+
+        entry = "/data /mnt none rbind,create=dir 0 0"
+        result = _parse_mount_entry(entry)
+        assert result["source"] == "/data"
+        assert result["has_dangerous_mount_options"] is True
+
+    def test_mount_entry_simple(self):
+        """Simple mount entry without = in options."""
+        from jibrilcon.scanners.lxc import _parse_mount_entry
+
+        entry = "proc proc proc rw 0 0"
+        result = _parse_mount_entry(entry)
+        assert result["source"] == "proc"
+        assert result["options"] == "rw"

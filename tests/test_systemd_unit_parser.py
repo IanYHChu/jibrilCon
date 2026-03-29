@@ -4,6 +4,7 @@ from jibrilcon.util.context import ScanContext
 from jibrilcon.util.systemd_unit_parser import (
     _guess_engine_and_container,
     _is_container_service,
+    _join_continuation_lines,
     _parse_unit_lines,
     collect_systemd_containers,
     scan_systemd_container_units,
@@ -159,3 +160,38 @@ def test_user_scope_service_discovered(tmp_path):
     rows = scan_systemd_container_units(str(tmp_path))
     engines = [r["engine"] for r in rows]
     assert "docker" in engines
+
+
+# ------------------------------------------------------------------ #
+# Backslash-newline continuation
+# ------------------------------------------------------------------ #
+
+
+def test_join_continuation_lines():
+    """Trailing backslash joins with the next line."""
+    lines = [
+        "ExecStart=/usr/bin/docker run \\",
+        "  --name web01 \\",
+        "  --privileged \\",
+        "  nginx",
+    ]
+    result = _join_continuation_lines(lines)
+    assert len(result) == 1
+    assert "--name web01" in result[0]
+    assert "--privileged" in result[0]
+    assert "nginx" in result[0]
+
+
+def test_parse_unit_lines_with_continuation():
+    """_parse_unit_lines should handle backslash continuation."""
+    lines = [
+        "[Service]",
+        "ExecStart=/usr/bin/docker run \\",
+        "  --name web01 \\",
+        "  nginx",
+        "User=root",
+    ]
+    result = _parse_unit_lines(lines)
+    assert len(result["ExecStart"]) == 1
+    assert "--name web01" in result["ExecStart"][0]
+    assert result["User"] == ["root"]

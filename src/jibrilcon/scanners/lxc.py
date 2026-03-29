@@ -587,7 +587,7 @@ def _parse_mount_entry(entry: str) -> dict[str, str | bool]:
     lxc.mount.entry format (fstab-style):
         <source> <dest> <type> <options> [<dump> <pass>]
     """
-    parts = entry.split("=", 1)[-1].strip().split()
+    parts = entry.strip().split()
     source = parts[0] if parts else ""
     # options are at index 3 (fstab field 4)
     options = parts[3] if len(parts) >= 4 else ""

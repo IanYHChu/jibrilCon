@@ -50,9 +50,26 @@ def _load_filters(path: Path | None = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Parsing helpers
 # --------------------------------------------------------------------------- #
+def _join_continuation_lines(lines: list[str]) -> list[str]:
+    """Join backslash-newline continuation lines per systemd.unit(5)."""
+    joined: list[str] = []
+    buf = ""
+    for ln in lines:
+        stripped = ln.rstrip()
+        if stripped.endswith("\\"):
+            buf += stripped[:-1]
+        else:
+            buf += stripped
+            joined.append(buf)
+            buf = ""
+    if buf:
+        joined.append(buf)
+    return joined
+
+
 def _parse_unit_lines(lines: list[str]) -> dict[str, list[str]]:
     data: dict[str, list[str]] = {}
-    for ln in lines:
+    for ln in _join_continuation_lines(lines):
         ln = ln.strip()
         if not ln or ln.startswith("#") or "=" not in ln:
             continue

@@ -263,6 +263,11 @@
         {
           "field": "net_type",
           "operator": "equals",
+          "value": "none"
+        },
+        {
+          "field": "net_type",
+          "operator": "equals",
           "value": "host"
         },
         {

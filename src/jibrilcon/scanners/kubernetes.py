@@ -1638,9 +1638,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             if apiserver_args_raw:
                 aargs: dict[str, str] = {}
                 for arg in apiserver_args_raw:
-                    if isinstance(arg, str) and "=" in arg:
+                    if not isinstance(arg, str):
+                        continue
+                    if "=" in arg:
                         k, v = arg.split("=", 1)
                         aargs[k.lstrip("-")] = v
+                    elif arg.startswith("--"):
+                        aargs[arg.lstrip("-")] = "true"
                 data = _extract_apiserver_fields(aargs)
                 key = f"ControlPlane/{distro}-apiserver"
                 vios_raw = evaluate_rules(data, cp_rules)
@@ -1676,9 +1680,13 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             if cm_args_raw:
                 cargs: dict[str, str] = {}
                 for arg in cm_args_raw:
-                    if isinstance(arg, str) and "=" in arg:
+                    if not isinstance(arg, str):
+                        continue
+                    if "=" in arg:
                         k, v = arg.split("=", 1)
                         cargs[k.lstrip("-")] = v
+                    elif arg.startswith("--"):
+                        cargs[arg.lstrip("-")] = "true"
                 data = _extract_controller_manager_fields(cargs)
                 key = f"ControlPlane/{distro}-controller-manager"
                 vios_raw = evaluate_rules(data, cp_rules)

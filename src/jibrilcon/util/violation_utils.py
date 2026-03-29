@@ -65,5 +65,6 @@ def process_violations(
         v["lines"] = line_resolver(v, used_fields)
         v.pop("conditions", None)
         v.pop("logic", None)
+        v.pop("severity_overrides", None)
         vios.append(v)
     return vios

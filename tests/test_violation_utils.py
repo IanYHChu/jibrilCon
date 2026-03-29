@@ -173,3 +173,38 @@ def test_multiple_violations_processed():
     for v in result:
         assert "conditions" not in v
         assert "logic" not in v
+
+
+def test_severity_overrides_stripped():
+    """severity_overrides is an internal field and should be stripped from output."""
+    vios_raw = [
+        {
+            "id": "rule_with_override",
+            "type": "warning",
+            "severity": 3.0,
+            "conditions": [{"field": "f", "op": "eq", "value": True}],
+            "logic": "and",
+            "severity_overrides": [
+                {
+                    "condition": {
+                        "field": "runtime_mode",
+                        "operator": "equals",
+                        "value": "rootless",
+                    },
+                    "severity": 2.0,
+                    "type": "info",
+                }
+            ],
+        },
+    ]
+
+    result = process_violations(
+        vios_raw,
+        cfg_path="/rootfs/cfg",
+        mount_path="/rootfs",
+        line_resolver=lambda v, uf: [],
+    )
+
+    assert len(result) == 1
+    assert "severity_overrides" not in result[0]
+    assert result[0]["severity"] == 3.0

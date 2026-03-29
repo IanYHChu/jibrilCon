@@ -4030,6 +4030,26 @@ class TestLxcScanner:
         assert vio["type"] == "warning"
         assert vio["severity"] == 6.0
 
+    def test_lxc_net_type_none_flagged(self, make_rootfs):
+        """lxc.net.0.type = none (host networking) should trigger host_network."""
+        r = make_rootfs
+        r.add_lxc_config(
+            "hostnet",
+            (
+                "lxc.rootfs.path = /var/lib/lxc/hostnet/rootfs\n"
+                "lxc.idmap = u 0 100000 65536\n"
+                "lxc.idmap = g 0 100000 65536\n"
+                "lxc.cap.drop = sys_admin\n"
+                "lxc.net.0.type = none\n"
+            ),
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "host_network" in vio_ids
+
     def test_lxc_include_merges_config(self, make_rootfs):
         """lxc.include directives should be followed and merged into config."""
         from pathlib import Path

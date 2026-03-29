@@ -2680,6 +2680,25 @@ kubelet-arg:
         assert "apiserver_anonymous_auth" in vio_ids
         assert "apiserver_authz_not_rbac" in vio_ids
 
+    def test_k3s_apiserver_bare_flag_detected(self, tmp_path):
+        """K3s bare --flag without =value should be parsed as flag=true."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kube-apiserver-arg:
+  - "--anonymous-auth"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        k3s_api = [r for r in cp if r["resource"] == "k3s-apiserver"]
+        assert len(k3s_api) == 1
+        vio_ids = [v["id"] for v in k3s_api[0]["violations"]]
+        assert "apiserver_anonymous_auth" in vio_ids
+
 
 # ================================================================== #
 # Phase 6: New detections -- sysctls, SELinux, fsGroup, webhooks,
