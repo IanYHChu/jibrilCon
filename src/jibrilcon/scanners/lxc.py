@@ -349,12 +349,8 @@ def _extract_no_new_privs(entries: dict[str, list[str]]) -> dict[str, bool]:
 def _extract_seccomp_profile(entries: dict[str, list[str]]) -> dict[str, bool]:
     """Check if lxc.seccomp.profile is configured."""
     # LXC supports both lxc.seccomp.profile (v3) and lxc.seccomp (v2)
-    vals = entries.get("lxc.seccomp.profile", []) + entries.get(
-        "lxc.seccomp", []
-    )
-    has_profile = any(
-        isinstance(v, str) and v.strip() for v in vals
-    )
+    vals = entries.get("lxc.seccomp.profile", []) + entries.get("lxc.seccomp", [])
+    has_profile = any(isinstance(v, str) and v.strip() for v in vals)
     return {"seccomp_profile_missing": not has_profile}
 
 

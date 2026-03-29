@@ -228,10 +228,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     def _bind_src(b: str) -> str:
         return str(b).split(":")[0]
 
-    dangerous_bind_path = any(
-        _bind_src(b) in _DANGEROUS_BIND_PATHS
-        for b in binds
-    )
+    dangerous_bind_path = any(_bind_src(b) in _DANGEROUS_BIND_PATHS for b in binds)
 
     # --- no-new-privileges ---
     no_new_privileges_missing = not any(
@@ -249,9 +246,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         opts = parts[2].split(",")
         return "shared" in opts or "rshared" in opts
 
-    mount_propagation_shared = any(
-        _has_shared_propagation(b) for b in binds
-    )
+    mount_propagation_shared = any(_has_shared_propagation(b) for b in binds)
 
     # --- Image tag :latest or missing ---
     image = cfg.get("Config", {}).get("Image", "") or cfg.get("Image", "")

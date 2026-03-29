@@ -1128,7 +1128,11 @@ class TestPodmanScanner:
                     {"type": "bind", "source": "/proc", "destination": "/host-proc"},
                 ],
                 "linux": {
-                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
                 },
             },
         )
@@ -1147,7 +1151,11 @@ class TestPodmanScanner:
                 "process": {"user": {"uid": 1000}},
                 "mounts": [],
                 "linux": {
-                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
                 },
             },
         )
@@ -1169,7 +1177,11 @@ class TestPodmanScanner:
                 },
                 "mounts": [],
                 "linux": {
-                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
                 },
             },
         )
@@ -1195,7 +1207,11 @@ class TestPodmanScanner:
                     },
                 ],
                 "linux": {
-                    "namespaces": [{"type": "pid"}, {"type": "network"}, {"type": "ipc"}],
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
                 },
             },
         )

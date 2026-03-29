@@ -164,7 +164,14 @@ class TestK3sManifests:
         # Create K3s detection hint
         (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
         _write_yaml(
-            root / "var" / "lib" / "rancher" / "k3s" / "server" / "manifests" / "app.yaml",
+            root
+            / "var"
+            / "lib"
+            / "rancher"
+            / "k3s"
+            / "server"
+            / "manifests"
+            / "app.yaml",
             """\
 apiVersion: apps/v1
 kind: Deployment
@@ -206,7 +213,14 @@ spec:
         root = _make_rootfs(tmp_path)
         (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
         _write_yaml(
-            root / "var" / "lib" / "rancher" / "k3s" / "agent" / "pod-manifests" / "mon.yaml",
+            root
+            / "var"
+            / "lib"
+            / "rancher"
+            / "k3s"
+            / "agent"
+            / "pod-manifests"
+            / "mon.yaml",
             """\
 apiVersion: v1
 kind: Pod
@@ -549,9 +563,7 @@ spec:
         ctx = _make_context()
         result = kubernetes.scan(str(root), context=ctx)
         priv = [
-            v
-            for v in result["results"][0]["violations"]
-            if v["id"] == "privileged"
+            v for v in result["results"][0]["violations"] if v["id"] == "privileged"
         ][0]
 
         # Enriched fields present
@@ -1483,9 +1495,7 @@ roleRef:
         )
         ctx = _make_context()
         result = kubernetes.scan(str(root), context=ctx)
-        bindings = [
-            r for r in result["results"] if r["kind"] == "RoleBinding"
-        ]
+        bindings = [r for r in result["results"] if r["kind"] == "RoleBinding"]
         assert len(bindings) == 1
         assert bindings[0]["status"] == "clean"
 
@@ -1653,9 +1663,7 @@ spec:
         )
         ctx = _make_context()
         result = kubernetes.scan(str(root), context=ctx)
-        netpols = [
-            r for r in result["results"] if r["kind"] == "NetworkPolicy"
-        ]
+        netpols = [r for r in result["results"] if r["kind"] == "NetworkPolicy"]
         assert len(netpols) == 1
         assert netpols[0]["status"] == "clean"
 

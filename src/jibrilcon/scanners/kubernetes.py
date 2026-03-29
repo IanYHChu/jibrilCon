@@ -90,7 +90,7 @@ _FIELD_TO_MANIFEST_KEY = {
     "host_ipc": "spec.hostIPC",
     "has_dangerous_hostpath": "spec.volumes[].hostPath",
     "hostpath_not_readonly": "volumeMounts[].readOnly",
-    "automount_sa_token": "automountServiceAccountToken",
+    "automount_sa_token": "automountServiceAccountToken",  # nosec B105
     "host_port_used": "ports[].hostPort",
     "no_resource_limits": "resources.limits",
     "service_user_missing": "service_user_missing",
@@ -357,6 +357,7 @@ def _extract_container_fields(
         if not hp:
             continue
         hp_path = hp.get("path", "")
+
         # Check dangerous paths -- exact or prefix match
         def _is_subpath(path: str, prefix: str) -> bool:
             return path == prefix or path.startswith(prefix + "/")
@@ -392,8 +393,7 @@ def _extract_container_fields(
 
     # --- mountPropagation: Bidirectional ---
     mount_propagation_bidir = any(
-        isinstance(vm, dict)
-        and vm.get("mountPropagation") == "Bidirectional"
+        isinstance(vm, dict) and vm.get("mountPropagation") == "Bidirectional"
         for vm in volume_mounts
     )
 
@@ -417,13 +417,9 @@ def _extract_container_fields(
     # Pre-1.30 annotation: container.apparmor.security.beta.kubernetes.io/<name>
     meta = pod_metadata or {}
     annotations = meta.get("annotations") or {}
-    aa_anno_key = (
-        f"container.apparmor.security.beta.kubernetes.io/{container_raw_name}"
-    )
+    aa_anno_key = f"container.apparmor.security.beta.kubernetes.io/{container_raw_name}"
     aa_anno_val = annotations.get(aa_anno_key, "")
-    apparmor_unconfined = (
-        aa_type == "Unconfined" or aa_anno_val == "unconfined"
-    )
+    apparmor_unconfined = aa_type == "Unconfined" or aa_anno_val == "unconfined"
 
     # --- procMount: Unmasked ---
     proc_mount_unmasked = sc.get("procMount", "Default") == "Unmasked"
@@ -433,9 +429,7 @@ def _extract_container_fields(
     for vm in volume_mounts:
         if not isinstance(vm, dict):
             continue
-        has_subpath = bool(
-            vm.get("subPath") or vm.get("subPathExpr")
-        )
+        has_subpath = bool(vm.get("subPath") or vm.get("subPathExpr"))
         if has_subpath:
             vol_name = vm.get("name", "")
             vol_def = volumes.get(vol_name, {})
@@ -444,9 +438,7 @@ def _extract_container_fields(
                 break
 
     # --- shareProcessNamespace ---
-    share_process_namespace = (
-        pod_spec.get("shareProcessNamespace", False) is True
-    )
+    share_process_namespace = pod_spec.get("shareProcessNamespace", False) is True
 
     return {
         "privileged": privileged,
@@ -490,9 +482,7 @@ def _build_volume_map(pod_spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------
 
 _RBAC_ROLE_KINDS = frozenset({"Role", "ClusterRole"})
-_RBAC_BINDING_KINDS = frozenset(
-    {"RoleBinding", "ClusterRoleBinding"}
-)
+_RBAC_BINDING_KINDS = frozenset({"RoleBinding", "ClusterRoleBinding"})
 
 # Dangerous sub-resource combinations
 _SECRET_VERBS = frozenset({"get", "list", "watch", "*"})
@@ -561,8 +551,10 @@ def _extract_rbac_role_fields(doc: dict[str, Any]) -> dict[str, Any]:
         # serviceaccounts/token create
         if "serviceaccounts/token" in resources and "create" in verbs:
             has_sa_token_create = True
-        if "*" in resources and "create" in verbs and (
-            "" in api_groups or "*" in api_groups
+        if (
+            "*" in resources
+            and "create" in verbs
+            and ("" in api_groups or "*" in api_groups)
         ):
             has_sa_token_create = True
 
@@ -600,7 +592,7 @@ def _extract_rbac_binding_fields(doc: dict[str, Any]) -> dict[str, Any]:
         "has_escalate_bind": False,
         "has_create_pods": False,
         "has_nodes_proxy": False,
-        "has_sa_token_create": False,
+        "has_sa_token_create": False,  # nosec B105
         "binds_default_sa": binds_default_sa,
     }
 
@@ -614,7 +606,7 @@ _RBAC_FIELD_TO_KEY = {
     "has_escalate_bind": "rules[].verbs (escalate/bind)",
     "has_create_pods": "rules[].verbs (create) + resources (pods)",
     "has_nodes_proxy": "rules[].resources (nodes/proxy)",
-    "has_sa_token_create": "rules[].resources (serviceaccounts/token)",
+    "has_sa_token_create": "rules[].resources (serviceaccounts/token)",  # nosec B105
     "binds_default_sa": "subjects[].name (default)",
 }
 
@@ -675,7 +667,7 @@ def _extract_netpol_fields(
 _INFRA_FIELD_TO_KEY = {
     "psa_enforce_missing": "metadata.labels[pod-security.kubernetes.io/enforce]",
     "psa_enforce_privileged": "metadata.labels[pod-security.kubernetes.io/enforce]",
-    "secret_plaintext_in_manifest": "data",
+    "secret_plaintext_in_manifest": "data",  # nosec B105
     "netpol_ingress_allow_all": "spec.ingress",
     "netpol_egress_allow_all": "spec.egress",
 }
@@ -731,9 +723,7 @@ def _extract_kubelet_fields(cfg: dict[str, Any]) -> dict[str, Any]:
 
     # readOnlyPort (default 10255 for older versions, 0 means disabled)
     readonly_port = cfg.get("readOnlyPort")
-    readonly_port_enabled = (
-        readonly_port is not None and readonly_port != 0
-    )
+    readonly_port_enabled = readonly_port is not None and readonly_port != 0
 
     # authorization.mode
     authz = cfg.get("authorization") or {}
@@ -747,8 +737,7 @@ def _extract_kubelet_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     # streamingConnectionIdleTimeout
     streaming_timeout = cfg.get("streamingConnectionIdleTimeout", "")
     streaming_timeout_disabled = streaming_timeout == "0" or (
-        isinstance(streaming_timeout, str)
-        and streaming_timeout == "0s"
+        isinstance(streaming_timeout, str) and streaming_timeout == "0s"
     )
 
     # eventRecordQPS
@@ -759,9 +748,7 @@ def _extract_kubelet_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     tls_cert = cfg.get("tlsCertFile", "")
     rotate_certs = cfg.get("rotateCertificates", False) is True
     server_tls_bootstrap = cfg.get("serverTLSBootstrap", False) is True
-    tls_cert_missing = (
-        not tls_cert and not rotate_certs and not server_tls_bootstrap
-    )
+    tls_cert_missing = not tls_cert and not rotate_certs and not server_tls_bootstrap
 
     return {
         "anonymous_auth_enabled": anonymous_enabled,
@@ -957,8 +944,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         container_raw_name=raw_name,
                         pod_metadata=pod_metadata,
                     )
-                    data["service_user_missing"] = (
-                        context.is_user_missing(resource_name)
+                    data["service_user_missing"] = context.is_user_missing(
+                        resource_name
                     )
                     vios_raw = evaluate_rules(data, pod_rules)
 
@@ -973,9 +960,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                                 lines.append(f"<missing> {mk}")
                         return lines
 
-                    vios = process_violations(
-                        vios_raw, fpath, mount_path, _resolve_pod
-                    )
+                    vios = process_violations(vios_raw, fpath, mount_path, _resolve_pod)
                     status = "violated" if vios else "clean"
                     if any(v["type"] == "alert" for v in vios):
                         alert_count += 1
@@ -1007,9 +992,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                             lines.append(f"<missing> {mk}")
                     return lines
 
-                vios = process_violations(
-                    vios_raw, fpath, mount_path, _resolve_rbac
-                )
+                vios = process_violations(vios_raw, fpath, mount_path, _resolve_rbac)
                 status = "violated" if vios else "clean"
                 if any(v["type"] == "alert" for v in vios):
                     alert_count += 1
@@ -1039,9 +1022,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                             lines.append(f"<missing> {mk}")
                     return lines
 
-                vios = process_violations(
-                    vios_raw, fpath, mount_path, _resolve_bind
-                )
+                vios = process_violations(vios_raw, fpath, mount_path, _resolve_bind)
                 status = "violated" if vios else "clean"
                 if any(v["type"] == "alert" for v in vios):
                     alert_count += 1
@@ -1080,9 +1061,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                             lines.append(f"<missing> {mk}")
                     return lines
 
-                vios = process_violations(
-                    vios_raw, fpath, mount_path, _resolve_infra
-                )
+                vios = process_violations(vios_raw, fpath, mount_path, _resolve_infra)
                 status = "violated" if vios else "clean"
                 if any(v["type"] == "alert" for v in vios):
                     alert_count += 1
@@ -1122,9 +1101,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                         lines.append(f"<missing> {mk}")
                 return lines
 
-            vios = process_violations(
-                vios_raw, cfg_path, mount_path, _resolve_node
-            )
+            vios = process_violations(vios_raw, cfg_path, mount_path, _resolve_node)
             status = "violated" if vios else "clean"
             if any(v["type"] == "alert" for v in vios):
                 alert_count += 1

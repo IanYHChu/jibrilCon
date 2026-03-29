@@ -242,10 +242,7 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     # --- Mount propagation shared/rshared ---
     mount_propagation_shared = any(
         isinstance(m, dict)
-        and (
-            "shared" in m.get("options", [])
-            or "rshared" in m.get("options", [])
-        )
+        and ("shared" in m.get("options", []) or "rshared" in m.get("options", []))
         for m in mounts
     )
 
