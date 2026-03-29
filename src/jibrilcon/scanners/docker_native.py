@@ -201,7 +201,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
             bracket_end = s.find("]")
             if bracket_end == -1:
                 return True
-            remainder = s[bracket_end + 1:]
+            remainder = s[bracket_end + 1 :]
             # remainder starts with ":" separating src from dst
             parts = remainder.lstrip(":").split(":")
             # parts[0] is dst; parts[1:] are opts if present

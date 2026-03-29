@@ -381,8 +381,10 @@ def _add_executive_summary(
         # Try common scanner-count keys (use None checks; 0 is valid)
         scanned = len(block.get("results", []))
         _SCANNED_KEYS = (
-            "docker_scanned", "podman_scanned",
-            "lxc_scanned", "containers_scanned",
+            "docker_scanned",
+            "podman_scanned",
+            "lxc_scanned",
+            "containers_scanned",
         )
         for key in _SCANNED_KEYS:
             val = s.get(key)

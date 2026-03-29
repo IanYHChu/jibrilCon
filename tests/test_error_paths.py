@@ -295,8 +295,7 @@ class TestLxcIncludeMalformed:
 
         cfg = conf_dir / "test.conf"
         cfg.write_text(
-            "lxc.include /some/path\n"
-            "lxc.rootfs.path = /var/lib/lxc/test/rootfs\n",
+            "lxc.include /some/path\nlxc.rootfs.path = /var/lib/lxc/test/rootfs\n",
             encoding="utf-8",
         )
 
