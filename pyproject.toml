@@ -42,6 +42,9 @@ where = ["src"]
 jibrilcon = ["py.typed", "rules/*.json", "rules/*.md", "config/*.json", "config/*.md"]
 
 [project.optional-dependencies]
+pdf = [
+    "fpdf2>=2.8",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -49,6 +52,7 @@ dev = [
     "mypy>=1.10",
     "types-PyYAML",
     "pre-commit>=3.7",
+    "fpdf2>=2.8",
 ]
 
 [tool.pytest.ini_options]

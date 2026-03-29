@@ -31,7 +31,7 @@ from typing import Any
 # ---------------------------------------------------------------------
 
 
-def _atomic_write(binary: bytes, target: Path) -> None:
+def atomic_write(binary: bytes, target: Path) -> None:
     """
     Write *binary* to *target* in an atomic fashion:
 
@@ -82,10 +82,16 @@ def write_report(
     """
     path = Path(output_path)
 
+    if path.suffix == ".pdf":
+        from jibrilcon.util.pdf_report import generate_pdf_report
+
+        generate_pdf_report(report, path)
+        return
+
     text = json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True)
     binary: bytes = text.encode("utf-8")
 
     if gzip_on_ext and path.suffix == ".gz":
         binary = gzip.compress(binary)
 
-    _atomic_write(binary, path)
+    atomic_write(binary, path)

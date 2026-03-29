@@ -77,6 +77,9 @@ examples:
   %(prog)s /mnt/target-rootfs -o report.json.gz --log-level debug
       Scan with verbose logging and write a gzip-compressed report.
 
+  %(prog)s /mnt/target-rootfs -o compliance.pdf
+      Generate a PDF compliance report mapped to MITRE, CIS, and NIST.
+
 exit codes:
   0   Scan completed successfully (findings may still be present).
   1   Scan failed due to a runtime or I/O error.
@@ -104,8 +107,9 @@ exit codes:
     parser.add_argument(
         "-o",
         "--output",
-        help="write the full JSON report to this path; use a .json.gz "
-        "extension for gzip-compressed output",
+        help="write the report to this path; supported formats: "
+        ".json, .json.gz (gzip-compressed JSON), "
+        ".pdf (compliance report -- requires: pip install jibrilcon[pdf])",
     )
     parser.add_argument(
         "--no-color",
@@ -150,6 +154,14 @@ exit codes:
         # 2. Run full scan – core.run_scan already returns the *final* report
         report = run_scan(args.mount_path, max_workers=args.max_workers)
 
+        # Attach metadata for PDF cover page (also useful in JSON)
+        report.setdefault("metadata", {}).update(
+            {
+                "mount_path": str(mount),
+                "version": __version__,
+            }
+        )
+
         # 3. Output
         if args.output:
             write_report(report, args.output)  # supports .json /.json.gz
@@ -168,6 +180,10 @@ exit codes:
             f"Error: scan aborted during filesystem analysis: {exc}",
             file=sys.stderr,
         )
+        sys.exit(1)
+    except ImportError as exc:
+        logger.error("Missing dependency: %s", exc)
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     except OSError as exc:
         logger.error("Scan failed: %s", exc, exc_info=True)
