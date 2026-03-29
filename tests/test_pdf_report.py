@@ -214,9 +214,7 @@ class TestPDFGeneration:
     def test_generate_full_report(self, tmp_path):
         from jibrilcon.util.pdf_report import generate_pdf_report
 
-        report = _make_report(
-            [_SAMPLE_VIOLATION, _SAMPLE_VIOLATION_2, _SAMPLE_WARNING]
-        )
+        report = _make_report([_SAMPLE_VIOLATION, _SAMPLE_VIOLATION_2, _SAMPLE_WARNING])
         out = tmp_path / "full_report.pdf"
         generate_pdf_report(report, out)
         assert out.exists()

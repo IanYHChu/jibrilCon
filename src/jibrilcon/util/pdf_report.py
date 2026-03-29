@@ -56,8 +56,7 @@ CIS_DOCKER_SECTIONS: dict[str, str] = {
     "5.8": "Ensure that only needed ports are open on the container",
     "5.12": "Ensure that the container's root filesystem is mounted as read only",
     "5.21": "Ensure the default seccomp profile is not disabled",
-    "5.25": "Ensure container is restricted from acquiring "
-    "additional privileges",
+    "5.25": "Ensure container is restricted from acquiring additional privileges",
     "5.26": "Ensure that container health is checked at runtime",
 }
 
@@ -241,7 +240,11 @@ class _CompliancePDF(FPDF if FPDF is not None else object):  # type: ignore[misc
         cell_heights: list[float] = []
         for text, w in cols:
             rendered = self.multi_cell(
-                w, h, text, dry_run=True, output="LINES",
+                w,
+                h,
+                text,
+                dry_run=True,
+                output="LINES",
             )
             n_lines = max(1, len(rendered))
             cell_heights.append(n_lines * h)
@@ -256,8 +259,14 @@ class _CompliancePDF(FPDF if FPDF is not None else object):  # type: ignore[misc
         for i, (text, w) in enumerate(cols):
             self.set_xy(x_start + sum(cw for _, cw in cols[:i]), y_start)
             self.multi_cell(
-                w, h, text, border=1, fill=fill,
-                max_line_height=h, new_x="RIGHT", new_y="TOP",
+                w,
+                h,
+                text,
+                border=1,
+                fill=fill,
+                max_line_height=h,
+                new_x="RIGHT",
+                new_y="TOP",
             )
         self.set_xy(x_start, y_start + max_h)
 
@@ -278,13 +287,14 @@ def _add_cover_page(pdf: _CompliancePDF, report: dict[str, Any]) -> None:
 
     pdf.set_font("Helvetica", "", 16)
     pdf.set_text_color(80, 80, 80)
+    pdf.cell(0, 10, "Compliance Report", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(
-        0, 10, "Compliance Report", align="C", new_x="LMARGIN", new_y="NEXT"
-    )
-    pdf.cell(
-        0, 8,
+        0,
+        8,
         "Static Container Configuration Risk Assessment",
-        align="C", new_x="LMARGIN", new_y="NEXT",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
     )
 
     pdf.ln(20)
@@ -391,7 +401,9 @@ def _add_executive_summary(
     if findings:
         pdf.section_title("Top Findings by Severity")
         sorted_findings = sorted(
-            findings, key=lambda f: f[2].get("severity", 0), reverse=True,
+            findings,
+            key=lambda f: f[2].get("severity", 0),
+            reverse=True,
         )
         top = sorted_findings[:10]
         cols = [
@@ -445,9 +457,11 @@ def _add_framework_chapter(
 
         pdf.set_font("Helvetica", "", 9)
         pdf.cell(
-            0, 5,
+            0,
+            5,
             f"{len(ref_findings)} finding(s)",
-            new_x="LMARGIN", new_y="NEXT",
+            new_x="LMARGIN",
+            new_y="NEXT",
         )
         pdf.ln(2)
 
@@ -484,9 +498,11 @@ def _add_detailed_findings(pdf: _CompliancePDF, report: dict[str, Any]) -> None:
             pdf.section_title(f"[{scanner}] {container}")
             pdf.set_font("Helvetica", "", 9)
             pdf.cell(
-                0, 5,
+                0,
+                5,
                 f"Status: {status}  |  Violations: {len(violations)}",
-                new_x="LMARGIN", new_y="NEXT",
+                new_x="LMARGIN",
+                new_y="NEXT",
             )
             pdf.ln(2)
 
@@ -495,9 +511,7 @@ def _add_detailed_findings(pdf: _CompliancePDF, report: dict[str, Any]) -> None:
                 _add_finding_detail(pdf, vio, finding_num)
 
 
-def _add_finding_detail(
-    pdf: _CompliancePDF, vio: dict[str, Any], num: int
-) -> None:
+def _add_finding_detail(pdf: _CompliancePDF, vio: dict[str, Any], num: int) -> None:
     pdf._check_page_space(50)
 
     # Finding header with severity badge
@@ -551,8 +565,11 @@ def _add_finding_detail(
             pdf.set_x(pdf.l_margin + 24)
         if len(lines) > 5:
             pdf.cell(
-                0, 4, f"... and {len(lines) - 5} more",
-                new_x="LMARGIN", new_y="NEXT",
+                0,
+                4,
+                f"... and {len(lines) - 5} more",
+                new_x="LMARGIN",
+                new_y="NEXT",
             )
 
     # References
