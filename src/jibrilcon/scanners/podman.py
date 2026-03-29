@@ -153,6 +153,8 @@ def _discover_configs(rootfs: str) -> list[tuple[str, str]]:
         index_data = load_json_or_empty(index_path)
         for entry in index_data:
             cid = entry.get("id")
+            if not cid:
+                continue
             names = entry.get("names", [])
             name = names[0] if names else cid[:_CONTAINER_ID_DISPLAY_LEN]
             cfg_path = os.path.join(
@@ -295,7 +297,11 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
 
     for name, cfg_path in _discover_configs(mount_path):
         # 1) load default config
-        cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
+        try:
+            cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
+        except RuntimeError as exc:
+            logger.warning("Skipping container %s: %s", name, exc)
+            continue
 
         # 2) acquire Exec* command lines  -----------------
         exec_lines: list[str] = context.get_exec_lines("podman", name)

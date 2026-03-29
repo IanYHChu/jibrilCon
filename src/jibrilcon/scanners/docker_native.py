@@ -317,8 +317,12 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
 
     for name, cfg_path, host_path in _discover_container_dirs(mount_path):
         # 1) load default config
-        cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
-        host_json = load_json_or_empty(resolve_path(host_path, mount_path))
+        try:
+            cfg_json = load_json_or_empty(resolve_path(cfg_path, mount_path))
+            host_json = load_json_or_empty(resolve_path(host_path, mount_path))
+        except RuntimeError as exc:
+            logger.warning("Skipping container %s: %s", name, exc)
+            continue
 
         # 2) acquire Exec* command lines  -----------------
         exec_lines: list[str] = context.get_exec_lines("docker", name)
