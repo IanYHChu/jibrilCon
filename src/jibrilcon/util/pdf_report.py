@@ -378,14 +378,13 @@ def _add_executive_summary(
     for i, block in enumerate(report.get("report", [])):
         s = block.get("summary", {})
         scanner = block.get("scanner", "unknown")
-        # Try common scanner-count keys
-        scanned = (
-            s.get("docker_scanned")
-            or s.get("podman_scanned")
-            or s.get("lxc_scanned")
-            or s.get("containers_scanned")
-            or len(block.get("results", []))
-        )
+        # Try common scanner-count keys (use None checks; 0 is valid)
+        scanned = len(block.get("results", []))
+        for key in ("docker_scanned", "podman_scanned", "lxc_scanned", "containers_scanned"):
+            val = s.get(key)
+            if val is not None:
+                scanned = val
+                break
         pdf._table_row(
             [
                 (scanner, 35.0),

@@ -48,7 +48,7 @@ def _iter_scanner_modules() -> list[ModuleType]:
     """Import every *.py file under scanners/ and yield modules."""
     try:
         pkg = importlib.import_module(_SCANNER_PKG)
-    except Exception:
+    except (ImportError, AttributeError, TypeError, ValueError, SyntaxError):
         logger.exception("Failed to import scanner package %s", _SCANNER_PKG)
         return []
 
@@ -59,7 +59,7 @@ def _iter_scanner_modules() -> list[ModuleType]:
         full_name = f"{_SCANNER_PKG}.{info.name}"
         try:
             modules.append(importlib.import_module(full_name))
-        except Exception:
+        except (ImportError, AttributeError, TypeError, ValueError, SyntaxError):
             logger.exception("Failed to import scanner module %s", full_name)
     return modules
 

@@ -9,9 +9,9 @@ Common path helpers used by scanners.
 from __future__ import annotations
 
 import os
-import threading
-from functools import lru_cache, wraps
 from pathlib import Path
+
+from jibrilcon.util.cache_utils import threadsafe_lru_cache
 
 # ---------------------------------------------------------------------
 # Hardening constants
@@ -124,44 +124,11 @@ def _resolve_symlink(path: str, rootfs_path: str) -> str:
 
 
 # ---------------------------------------------------------------------
-# Thread-safe caching wrapper
-# ---------------------------------------------------------------------
-
-
-def _threadsafe_lru_cache(maxsize: int = 128):
-    """
-    Decorator combining @lru_cache with a threading.Lock.
-
-    Python's @lru_cache is not fully thread-safe on cache misses before
-    Python 3.12.  Since scanners run in parallel via ThreadPoolExecutor,
-    we guard cache access with a lock to prevent data races.
-
-    The wrapper exposes cache_info() and cache_clear() for compatibility
-    with existing test fixtures.
-    """
-
-    def decorator(fn):
-        cached = lru_cache(maxsize=maxsize)(fn)
-        lock = threading.Lock()
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            with lock:
-                return cached(*args, **kwargs)
-
-        wrapper.cache_clear = cached.cache_clear
-        wrapper.cache_info = cached.cache_info
-        return wrapper
-
-    return decorator
-
-
-# ---------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------
 
 
-@_threadsafe_lru_cache(maxsize=2048)
+@threadsafe_lru_cache(maxsize=2048)
 def resolve_path(path: str, rootfs_path: str) -> str:
     """
     Cached symlink resolver suitable for scanners.

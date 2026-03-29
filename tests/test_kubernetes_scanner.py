@@ -4,30 +4,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import _FAKE_SYSTEMD, _make_context, _write_binary
+
 from jibrilcon.scanners import kubernetes
-from jibrilcon.util.context import ScanContext
 
 # ------------------------------------------------------------------ #
 # Helpers
 # ------------------------------------------------------------------ #
 
-_FAKE_SYSTEMD = b"\x7fELF\x02" + b"\x00" * 11 + b"systemd"
-
-
-def _make_context() -> ScanContext:
-    ctx = ScanContext()
-    ctx.init_system = "systemd"
-    return ctx
-
 
 def _write_yaml(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-
-
-def _write_binary(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
 
 
 def _make_rootfs(tmp_path: Path) -> Path:

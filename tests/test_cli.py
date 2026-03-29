@@ -153,3 +153,17 @@ def test_main_os_error_handled(make_rootfs, capsys):
             assert exc.value.code == 1
     captured = capsys.readouterr()
     assert "disk fail" in captured.err
+
+
+# ------------------------------------------------------------------ #
+# __main__.py entry point
+# ------------------------------------------------------------------ #
+
+
+def test_dunder_main_calls_main():
+    """Verify that 'python -m jibrilcon' invokes cli.main()."""
+    with patch("jibrilcon.cli.main") as mock_main:
+        import runpy
+
+        runpy.run_module("jibrilcon", run_name="__main__", alter_sys=False)
+    mock_main.assert_called_once()

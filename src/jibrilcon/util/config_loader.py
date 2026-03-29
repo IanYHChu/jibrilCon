@@ -49,8 +49,8 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
         return json.loads(text)
-    except FileNotFoundError as exc:
-        raise ConfigLoadError(f"Config file not found: {path}") from exc
+    except (FileNotFoundError, UnicodeDecodeError) as exc:
+        raise ConfigLoadError(f"Cannot read config file: {path}") from exc
     except json.JSONDecodeError as exc:
         raise ConfigLoadError(f"Invalid JSON in config file: {path}") from exc
 

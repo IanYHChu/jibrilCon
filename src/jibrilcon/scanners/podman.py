@@ -280,7 +280,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
         If *context* is None (must be supplied by core.run_scan).
     """
     if context is None:
-        raise ValueError("ScanContext must be supplied by core.run_scan")
+        raise ValueError("podman: ScanContext must be supplied by core.run_scan")
 
     try:
         rules_cfg = load_json_config(RULE_PATH)
@@ -346,6 +346,8 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                             mod_data = toml.load(fp)
                         if isinstance(mod_data, dict):
                             deep_merge(cfg_json, mod_data)
+                        else:
+                            logger.warning("TOML module %s is not a dict (got %s), skipping", name_or_path, type(mod_data).__name__)
                     except (OSError, ValueError, KeyError) as exc:
                         logger.warning(
                             "Skipping malformed module %s: %s", mod_path, exc

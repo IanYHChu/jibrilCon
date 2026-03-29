@@ -13,11 +13,9 @@ from jibrilcon.util.config_loader import (
 
 
 @pytest.fixture(autouse=True)
-def _fresh_cache():
-    """Ensure each test starts with a clean LRU cache."""
-    clear_cache()
+def _fresh_cache(fresh_cache):
+    """Delegate to the shared fresh_cache fixture in conftest."""
     yield
-    clear_cache()
 
 
 def test_load_json_config_basic(tmp_path):
@@ -36,7 +34,7 @@ def test_load_json_config_caching(tmp_path):
 
 
 def test_load_json_config_missing_file():
-    with pytest.raises(ConfigLoadError, match="not found"):
+    with pytest.raises(ConfigLoadError, match="Cannot read config file"):
         load_json_config("/nonexistent/path.json")
 
 

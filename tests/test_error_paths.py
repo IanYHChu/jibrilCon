@@ -7,22 +7,13 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.conftest import _make_context
+
 from jibrilcon.util.config_loader import (
     ConfigLoadError,
     clear_cache,
     load_json_config,
 )
-from jibrilcon.util.context import ScanContext
-
-# ------------------------------------------------------------------ #
-# Helpers
-# ------------------------------------------------------------------ #
-
-
-def _make_context() -> ScanContext:
-    ctx = ScanContext()
-    ctx.init_system = "systemd"
-    return ctx
 
 
 # ------------------------------------------------------------------ #
@@ -58,10 +49,9 @@ class TestCliScanFailure:
 
 class TestConfigLoaderThreadSafety:
     @pytest.fixture(autouse=True)
-    def _fresh_cache(self):
-        clear_cache()
+    def _fresh_cache(self, fresh_cache):
+        """Delegate to the shared fresh_cache fixture in conftest."""
         yield
-        clear_cache()
 
     def test_config_loader_thread_safety(self, tmp_path):
         """Concurrent loads of the same valid file must all return the

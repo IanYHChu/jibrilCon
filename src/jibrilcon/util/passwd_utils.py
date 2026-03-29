@@ -27,50 +27,45 @@ def get_user_home_dirs(rootfs: str) -> list[str]:
     """
     homes: list[str] = []
     passwd = os.path.join(rootfs, "etc/passwd")
-    if not os.path.exists(passwd):
-        return homes
 
+    lineno = 0
     try:
-        fh = open(passwd, encoding="utf-8")  # noqa: SIM115
+        with open(passwd, encoding="utf-8") as fh:
+            try:
+                for lineno, line in enumerate(fh, start=1):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    parts = stripped.split(":")
+                    if len(parts) < 6:
+                        logger.debug(
+                            "Skipping malformed passwd line %d in %s: "
+                            "expected >= 6 fields, got %d",
+                            lineno,
+                            passwd,
+                            len(parts),
+                        )
+                        continue
+                    home = parts[5].strip()
+                    if home:
+                        try:
+                            safe_home = safe_join(rootfs, home.lstrip("/"))
+                            homes.append(str(safe_home))
+                        except ValueError:
+                            logger.warning(
+                                "Skipping passwd home directory that escapes rootfs: %s",
+                                home,
+                            )
+            except UnicodeDecodeError:
+                logger.warning(
+                    "Stopped reading %s at line %d: encoding error",
+                    passwd,
+                    lineno,
+                )
+    except FileNotFoundError:
+        return homes
     except PermissionError:
         logger.warning("Cannot read %s: permission denied", passwd)
         return homes
-    except UnicodeDecodeError:
-        logger.warning("Cannot read %s: not valid UTF-8", passwd)
-        return homes
-
-    lineno = 0
-    with fh:
-        try:
-            for lineno, line in enumerate(fh, start=1):
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                parts = stripped.split(":")
-                if len(parts) < 6:
-                    logger.debug(
-                        "Skipping malformed passwd line %d in %s: "
-                        "expected >= 6 fields, got %d",
-                        lineno,
-                        passwd,
-                        len(parts),
-                    )
-                    continue
-                home = parts[5].strip()
-                if home:
-                    try:
-                        safe_home = safe_join(rootfs, home.lstrip("/"))
-                        homes.append(str(safe_home))
-                    except ValueError:
-                        logger.warning(
-                            "Skipping passwd home directory that escapes rootfs: %s",
-                            home,
-                        )
-        except UnicodeDecodeError:
-            logger.warning(
-                "Stopped reading %s at line %d: encoding error",
-                passwd,
-                lineno,
-            )
 
     return homes

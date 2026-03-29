@@ -11,9 +11,12 @@ dicts used by all scanners.
 
 from __future__ import annotations
 
-import os
+import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def process_violations(
@@ -51,7 +54,14 @@ def process_violations(
         used_fields: set[str] = {
             c.get("field") for c in v.get("conditions", []) if c.get("field")
         }
-        v["source"] = "/" + os.path.relpath(cfg_path, mount_path)
+        try:
+            rel = Path(cfg_path).relative_to(Path(mount_path))
+            v["source"] = "/" + str(rel)
+        except ValueError:
+            logger.warning(
+                "Config path %s is not under mount path %s", cfg_path, mount_path
+            )
+            v["source"] = str(cfg_path)
         v["lines"] = line_resolver(v, used_fields)
         v.pop("conditions", None)
         v.pop("logic", None)

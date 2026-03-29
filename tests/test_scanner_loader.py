@@ -1,6 +1,6 @@
 """Tests for util/scanner_loader.py."""
 
-import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType
 from unittest.mock import patch
@@ -275,8 +275,13 @@ def test_individual_module_import_failure_does_not_crash(caplog):
 def test_scanner_timeout_handled_gracefully(mock_iter, caplog):
     """A scanner exceeding the timeout is logged and other scanners still run."""
 
+    # Use an Event so the slow scanner blocks without relying on wall-clock
+    # timing.  The short scanner_timeout causes the executor deadline to
+    # expire, and we set the event afterwards to unblock cleanup.
+    release = threading.Event()
+
     def slow_scan(mount_path, *, context=None):
-        time.sleep(3)
+        release.wait(timeout=30)  # safety cap; normally released below
         return {"scanner": "slow", "findings": []}
 
     def fast_scan(mount_path, *, context=None):
@@ -287,14 +292,20 @@ def test_scanner_timeout_handled_gracefully(mock_iter, caplog):
         _make_scanner_module("jibrilcon.scanners.fast", fast_scan),
     ]
 
-    results = run_scanners("/fake/rootfs", context=ScanContext(), scanner_timeout=0.5)
+    try:
+        results = run_scanners(
+            "/fake/rootfs", context=ScanContext(), scanner_timeout=0.5
+        )
 
-    # The fast scanner should still produce its result
-    assert len(results) == 1
-    assert results[0]["scanner"] == "fast"
+        # The fast scanner should still produce its result
+        assert len(results) == 1
+        assert results[0]["scanner"] == "fast"
 
-    # The slow scanner should be logged as timed out
-    timeout_records = [r for r in caplog.records if "timed out" in r.message]
-    assert len(timeout_records) == 1
-    assert "slow" in timeout_records[0].message
-    assert timeout_records[0].levelname == "ERROR"
+        # The slow scanner should be logged as timed out
+        timeout_records = [r for r in caplog.records if "timed out" in r.message]
+        assert len(timeout_records) == 1
+        assert "slow" in timeout_records[0].message
+        assert timeout_records[0].levelname == "ERROR"
+    finally:
+        # Unblock the slow scanner thread so it can exit cleanly
+        release.set()

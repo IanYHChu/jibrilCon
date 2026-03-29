@@ -61,6 +61,12 @@ def run_scan(
         Per-scanner timeout in seconds (default 300).
     """
     mount_path = Path(mount_path)
+    if not mount_path.is_dir():
+        raise ValueError(f"mount_path must be an existing directory: {mount_path}")
+    if max_workers < 1:
+        raise ValueError(f"max_workers must be >= 1, got {max_workers}")
+    if scanner_timeout <= 0:
+        raise ValueError(f"scanner_timeout must be > 0, got {scanner_timeout}")
     context = ScanContext()
 
     # 1. Init-system detection & pre-collection

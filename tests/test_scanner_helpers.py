@@ -1,31 +1,12 @@
 """Tests for scanner internal helper functions and edge cases."""
 
-import json
 from pathlib import Path
+
+from tests.conftest import _make_context, _write_text
 
 from jibrilcon.scanners import docker_native, lxc, podman
 from jibrilcon.scanners.docker_native import _extract_fields, _to_bool
 from jibrilcon.util.context import ScanContext
-
-# ------------------------------------------------------------------ #
-# Helpers
-# ------------------------------------------------------------------ #
-
-
-def _make_context() -> ScanContext:
-    ctx = ScanContext()
-    ctx.init_system = "systemd"
-    return ctx
-
-
-def _write_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 # ------------------------------------------------------------------ #

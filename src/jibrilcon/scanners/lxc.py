@@ -399,7 +399,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, objec
         If *context* is None (must be supplied by core.run_scan).
     """
     if context is None:
-        raise ValueError("ScanContext must be supplied by core.run_scan")
+        raise ValueError("lxc: ScanContext must be supplied by core.run_scan")
 
     try:
         rules_cfg = load_json_config(RULE_PATH)

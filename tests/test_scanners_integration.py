@@ -3,18 +3,9 @@
 import json
 from pathlib import Path
 
+from tests.conftest import _make_context
+
 from jibrilcon.scanners import docker_native, lxc, podman
-from jibrilcon.util.context import ScanContext
-
-# ------------------------------------------------------------------ #
-# Helpers
-# ------------------------------------------------------------------ #
-
-
-def _make_context() -> ScanContext:
-    ctx = ScanContext()
-    ctx.init_system = "systemd"
-    return ctx
 
 
 # ------------------------------------------------------------------ #

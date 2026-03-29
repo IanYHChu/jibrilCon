@@ -195,10 +195,24 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     # Docker bind format: src:dst[:opts] where opts is comma-separated
     # (e.g. "ro", "ro,rslave"). A bind is readonly if "ro" appears in opts.
     def _bind_is_writable(b: str) -> bool:
-        parts = str(b).split(":")
-        if len(parts) < 3:
-            return True  # no options means default (rw)
-        opts = parts[2].split(",")
+        s = str(b)
+        # Handle bracketed IPv6 addresses like [::1]:/mnt:ro
+        if s.startswith("["):
+            bracket_end = s.find("]")
+            if bracket_end == -1:
+                return True
+            remainder = s[bracket_end + 1:]
+            # remainder starts with ":" separating src from dst
+            parts = remainder.lstrip(":").split(":")
+            # parts[0] is dst; parts[1:] are opts if present
+            if len(parts) < 2:
+                return True  # no options means default (rw)
+            opts = parts[1].split(",")
+        else:
+            parts = s.split(":")
+            if len(parts) < 3:
+                return True  # no options means default (rw)
+            opts = parts[2].split(",")
         return "ro" not in opts
 
     binds_not_readonly = any(_bind_is_writable(b) for b in binds)
@@ -215,7 +229,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     if not isinstance(cap_add, list):
         logger.warning("CapAdd is not a list, ignoring: %s", type(cap_add).__name__)
         cap_add = []
-    normalised_caps = {str(c).removeprefix("CAP_") for c in cap_add}
+    normalised_caps = {str(c).removeprefix("CAP_").upper() for c in cap_add}
     dangerous_caps_added = bool(normalised_caps & _DANGEROUS_CAPS)
 
     # No capabilities explicitly dropped
@@ -258,7 +272,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
             tag = img_no_digest.rsplit(":", 1)[-1]
             image_tag_latest = tag == "latest"
     else:
-        image_tag_latest = True
+        image_tag_latest = False
 
     return {
         "privileged": privileged,
@@ -300,7 +314,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
         Result structure compatible with jibrilcon summary generator.
     """
     if context is None:
-        raise ValueError("ScanContext must be supplied by core.run_scan")
+        raise ValueError("docker_native: ScanContext must be supplied by core.run_scan")
 
     try:
         rules_cfg = load_json_config(RULE_PATH)

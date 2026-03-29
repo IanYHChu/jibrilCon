@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from jibrilcon.util.config_loader import clear_cache
+from jibrilcon.util.context import ScanContext
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -23,11 +26,26 @@ def fixtures_dir():
     return d
 
 
+@pytest.fixture(autouse=False)
+def fresh_cache():
+    """Ensure each test starts with a clean LRU cache."""
+    clear_cache()
+    yield
+    clear_cache()
+
+
 # ------------------------------------------------------------------ #
 # Helpers for building minimal rootfs layouts in tmp_path
 # ------------------------------------------------------------------ #
 
 _FAKE_SYSTEMD = b"\x7fELF\x02" + b"\x00" * 11 + b"systemd"
+
+
+def _make_context() -> ScanContext:
+    """Create a ScanContext pre-set for systemd."""
+    ctx = ScanContext()
+    ctx.init_system = "systemd"
+    return ctx
 
 
 def _write_json(path: Path, data) -> None:

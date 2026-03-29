@@ -106,8 +106,7 @@ def detect_init_system(rootfs: Path | str) -> str:
         try:
             p.lstat()
         except OSError:
-            if not p.exists():
-                continue
+            continue
         # Resolve symlinks within rootfs boundary
         try:
             resolved = Path(resolve_path(str(p), rootfs_str))
