@@ -314,6 +314,27 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "apiserver_audit_retention_missing",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "API server audit logging is enabled but retention policy is not configured",
+      "risk": "Without audit-log-maxage and audit-log-maxbackup, audit logs may grow unbounded (disk exhaustion) or be missing retention guarantees for compliance.",
+      "remediation": "Set --audit-log-maxage (days) and --audit-log-maxbackup (file count) flags.",
+      "references": {
+        "mitre_attack": ["T1562.002"],
+        "cis_kubernetes_benchmark": ["1.2.22"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "apiserver_audit_retention_missing",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

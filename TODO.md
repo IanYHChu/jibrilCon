@@ -73,20 +73,20 @@ Each container runtime has unique security models -- do NOT apply a universal ch
 
 ### MEDIUM
 - [x] Validate `fsGroup` in pod security context
-- [ ] Check liveness/readiness probe security (exec probes with arbitrary commands)
-- [ ] Validate volume types: NFS, iSCSI, flexVolume (implicit security properties)
-- [ ] Detect missing `ResourceQuota` / default-deny `NetworkPolicy` per namespace
+- [x] Check liveness/readiness probe security (exec probes with arbitrary commands)
+- [x] Validate volume types: NFS, iSCSI, flexVolume (implicit security properties)
+- [ ] Detect missing `ResourceQuota` / default-deny `NetworkPolicy` per namespace (deferred -- requires cross-manifest correlation that is beyond the current per-manifest scanning architecture)
 - [x] Scan `PersistentVolume` for hostPath PVs
-- [ ] Detect workload-specific risks (DaemonSet on all nodes, CronJob history limits)
+- [x] Detect workload-specific risks (DaemonSet on all nodes, CronJob history limits)
 
 ### K3s/RKE2-specific
-- [ ] Validate `--write-kubeconfig` permissions
-- [ ] Check `--datastore-endpoint` for TLS/credentials
+- [x] Validate `--write-kubeconfig` permissions
+- [x] Check `--datastore-endpoint` for TLS/credentials
 - [x] Scan `/var/lib/rancher/k3s/server/token` file permissions
 - [x] Check `/etc/rancher/k3s/registries.yaml` for embedded secrets
-- [ ] Detect K3s bootstrap token rotation configuration
-- [ ] Validate K3s-specific `--kubelet-arg` and `--kube-apiserver-arg` flags
+- [x] Detect K3s bootstrap token rotation configuration
+- [x] Validate K3s-specific `--kubelet-arg` and `--kube-apiserver-arg` flags (already implemented via control plane scanning: kube-apiserver-arg, kube-controller-manager-arg, and kubelet-arg are all parsed)
 
 ### API server audit logging
 - [x] Detect missing `--audit-log-path` and `--audit-policy-file`
-- [ ] Validate audit log retention (maxage, maxbackup)
+- [x] Validate audit log retention (maxage, maxbackup)

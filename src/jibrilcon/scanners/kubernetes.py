@@ -110,6 +110,14 @@ _FIELD_TO_MANIFEST_KEY = {
     "has_unsafe_sysctls": "spec.securityContext.sysctls",
     "selinux_not_set": "securityContext.seLinuxOptions",
     "fsgroup_missing": "spec.securityContext.fsGroup",
+    "has_exec_probe": "livenessProbe/readinessProbe/startupProbe.exec",
+    "has_insecure_volume_type": (
+        "spec.volumes[] (nfs/iscsi/flexVolume/fc/cephfs/glusterfs)"
+    ),
+    "is_daemonset": "kind: DaemonSet",
+    "cronjob_no_history": (
+        "spec.successfulJobsHistoryLimit / spec.failedJobsHistoryLimit"
+    ),
 }
 
 # Pod spec path per resource kind
@@ -475,6 +483,22 @@ def _extract_container_fields(
     fsgroup = pod_sc.get("fsGroup")
     fsgroup_missing = fsgroup is None
 
+    # --- exec probes (liveness, readiness, startup) ---
+    liveness = container.get("livenessProbe") or {}
+    readiness = container.get("readinessProbe") or {}
+    startup = container.get("startupProbe") or {}
+    has_exec_probe = any(
+        isinstance(p, dict) and p.get("exec") for p in (liveness, readiness, startup)
+    )
+
+    # --- insecure volume types (NFS, iSCSI, flexVolume, etc.) ---
+    _INSECURE_VOLUME_TYPES = {"nfs", "iscsi", "flexVolume", "fc", "cephfs", "glusterfs"}
+    has_insecure_volume_type = any(
+        any(vtype in vol for vtype in _INSECURE_VOLUME_TYPES)
+        for vol in volumes.values()
+        if isinstance(vol, dict)
+    )
+
     return {
         "privileged": privileged,
         "runs_as_root": runs_as_root,
@@ -501,6 +525,8 @@ def _extract_container_fields(
         "has_unsafe_sysctls": has_unsafe_sysctls,
         "selinux_not_set": selinux_not_set,
         "fsgroup_missing": fsgroup_missing,
+        "has_exec_probe": has_exec_probe,
+        "has_insecure_volume_type": has_insecure_volume_type,
     }
 
 
@@ -945,6 +971,14 @@ def _extract_k3s_rke2_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     tls_cert = kargs.get("tls-cert-file", "not-checked")
     tls_cert_missing = tls_cert == ""
 
+    # datastore-endpoint without TLS
+    datastore = cfg.get("datastore-endpoint", "")
+    datastore_no_tls = isinstance(datastore, str) and datastore.startswith("http://")
+
+    # Token rotation -- static token vs token-file
+    has_static_token = bool(cfg.get("token", ""))
+    static_token_no_rotation = has_static_token and not cfg.get("token-file", "")
+
     return {
         "anonymous_auth_enabled": anonymous_enabled,
         "readonly_port_enabled": readonly_port_enabled,
@@ -953,6 +987,8 @@ def _extract_k3s_rke2_fields(cfg: dict[str, Any]) -> dict[str, Any]:
         "streaming_timeout_disabled": streaming_timeout_disabled,
         "event_record_qps_disabled": event_record_qps_disabled,
         "tls_cert_missing": tls_cert_missing,
+        "datastore_no_tls": datastore_no_tls,
+        "static_token_no_rotation": static_token_no_rotation,
     }
 
 
@@ -967,6 +1003,24 @@ def _check_k3s_token_permissions(rootfs: str) -> dict[str, Any]:
         return {"k3s_token_world_readable": world_readable}
     except OSError:
         return {"k3s_token_world_readable": False}
+
+
+def _check_k3s_kubeconfig_permissions(rootfs: str) -> dict[str, Any]:
+    """Check if K3s kubeconfig is world-readable."""
+    paths = [
+        "etc/rancher/k3s/k3s.yaml",
+        "var/lib/rancher/k3s/server/cred/admin.kubeconfig",
+    ]
+    for rel in paths:
+        full = os.path.join(rootfs, rel)
+        if os.path.isfile(full):
+            try:
+                mode = os.stat(full).st_mode
+                if mode & 0o044:  # group or other readable
+                    return {"k3s_kubeconfig_world_readable": True}
+            except OSError:
+                continue
+    return {"k3s_kubeconfig_world_readable": False}
 
 
 def _check_k3s_registries_secrets(rootfs: str) -> dict[str, Any]:
@@ -997,6 +1051,11 @@ _NODE_FIELD_TO_KEY = {
     "systemd_caps_unrestricted": "systemd.CapabilityBoundingSet",
     "k3s_token_world_readable": "/var/lib/rancher/k3s/server/token",  # nosec B105
     "k3s_registry_has_secrets": "/etc/rancher/k3s/registries.yaml",
+    "k3s_kubeconfig_world_readable": (
+        "/etc/rancher/k3s/k3s.yaml (--write-kubeconfig-mode)"
+    ),
+    "datastore_no_tls": "datastore-endpoint",
+    "static_token_no_rotation": "token / token-file",  # nosec B105
 }
 
 
@@ -1029,6 +1088,13 @@ def _parse_component_args(doc: dict[str, Any]) -> dict[str, str]:
 
 def _extract_apiserver_fields(args: dict[str, str]) -> dict[str, Any]:
     """Extract security fields from kube-apiserver arguments."""
+    # Audit log retention: flag if audit logging is enabled but retention
+    # is not configured
+    has_audit = bool(args.get("audit-log-path"))
+    audit_maxage = args.get("audit-log-maxage", "")
+    audit_maxbackup = args.get("audit-log-maxbackup", "")
+    audit_retention_missing = has_audit and (not audit_maxage or not audit_maxbackup)
+
     return {
         "apiserver_anonymous_auth": args.get("anonymous-auth", "") == "true",
         "apiserver_insecure_port": (args.get("insecure-port", "0") != "0"),
@@ -1039,6 +1105,7 @@ def _extract_apiserver_fields(args: dict[str, str]) -> dict[str, Any]:
         "apiserver_admission_missing": not args.get("enable-admission-plugins"),
         "apiserver_audit_log_missing": not args.get("audit-log-path"),
         "apiserver_audit_policy_missing": not args.get("audit-policy-file"),
+        "apiserver_audit_retention_missing": audit_retention_missing,
     }
 
 
@@ -1074,6 +1141,7 @@ _APISERVER_FIELD_TO_KEY = {
     "apiserver_admission_missing": "--enable-admission-plugins",
     "apiserver_audit_log_missing": "--audit-log-path",
     "apiserver_audit_policy_missing": "--audit-policy-file",
+    "apiserver_audit_retention_missing": "--audit-log-maxage / --audit-log-maxbackup",
 }
 
 _ETCD_FIELD_TO_KEY = {
@@ -1225,6 +1293,21 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                     data["service_user_missing"] = context.is_user_missing(
                         resource_name
                     )
+
+                    # Workload-specific risk fields
+                    data["is_daemonset"] = kind == "DaemonSet"
+
+                    # CronJob history limits
+                    if kind == "CronJob":
+                        cron_spec = doc.get("spec", {})
+                        success_limit = cron_spec.get("successfulJobsHistoryLimit")
+                        failed_limit = cron_spec.get("failedJobsHistoryLimit")
+                        data["cronjob_no_history"] = (
+                            isinstance(success_limit, int) and success_limit == 0
+                        ) or (isinstance(failed_limit, int) and failed_limit == 0)
+                    else:
+                        data["cronjob_no_history"] = False
+
                     vios_raw = evaluate_rules(data, pod_rules)
 
                     def _resolve_pod(_v, used_fields, _d=data):
@@ -1416,6 +1499,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
             if distro in ("k3s", "rke2"):
                 data.update(_check_k3s_token_permissions(mount_path))
                 data.update(_check_k3s_registries_secrets(mount_path))
+                data.update(_check_k3s_kubeconfig_permissions(mount_path))
 
             key = f"NodeConfig/{distro}"
             vios_raw = evaluate_rules(data, node_rules)

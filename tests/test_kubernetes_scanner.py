@@ -2480,6 +2480,8 @@ spec:
     - --enable-admission-plugins=NodeRestriction,PodSecurity
     - --audit-log-path=/var/log/kubernetes/audit.log
     - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+    - --audit-log-maxage=30
+    - --audit-log-maxbackup=10
 """,
         )
         ctx = _make_context()
@@ -3169,6 +3171,8 @@ spec:
     - --enable-admission-plugins=NodeRestriction,PodSecurity
     - --audit-log-path=/var/log/kubernetes/audit.log
     - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+    - --audit-log-maxage=30
+    - --audit-log-maxbackup=10
 """,
         )
         ctx = _make_context()
@@ -3179,6 +3183,7 @@ spec:
         vio_ids = [v["id"] for v in apiserver[0]["violations"]]
         assert "apiserver_audit_log_missing" not in vio_ids
         assert "apiserver_audit_policy_missing" not in vio_ids
+        assert "apiserver_audit_retention_missing" not in vio_ids
 
     def test_k3s_apiserver_audit_missing(self, tmp_path):
         """K3s config without audit args should trigger."""
@@ -3384,3 +3389,759 @@ kubelet-arg:
         assert len(node) == 1
         vio_ids = [v["id"] for v in node[0]["violations"]]
         assert "k3s_registry_has_secrets" not in vio_ids
+
+
+# ================================================================== #
+# Phase 7: Exec probes, insecure volumes, workload-specific risks,
+#           K3s kubeconfig/datastore/token, audit retention
+# ================================================================== #
+
+
+class TestExecProbe:
+    """Tests for exec probe detection."""
+
+    def test_exec_liveness_probe(self, tmp_path):
+        """Container with exec liveness probe should trigger info."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "exec-probe.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exec-probe-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    livenessProbe:
+      exec:
+        command:
+        - cat
+        - /tmp/healthy
+      initialDelaySeconds: 5
+      periodSeconds: 10
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "exec_probe_used" in vio_ids
+
+    def test_exec_readiness_probe(self, tmp_path):
+        """Container with exec readiness probe should trigger info."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "exec-ready.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exec-ready-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    readinessProbe:
+      exec:
+        command:
+        - test
+        - -f
+        - /tmp/ready
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "exec_probe_used" in vio_ids
+
+    def test_exec_startup_probe(self, tmp_path):
+        """Container with exec startup probe should trigger info."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "exec-startup.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exec-startup-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    startupProbe:
+      exec:
+        command:
+        - cat
+        - /tmp/started
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "exec_probe_used" in vio_ids
+
+    def test_http_probe_not_flagged(self, tmp_path):
+        """Container with httpGet probe should not trigger exec_probe_used."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "http-probe.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: http-probe-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "exec_probe_used" not in vio_ids
+
+    def test_no_probe_not_flagged(self, tmp_path):
+        """Container without probes should not trigger exec_probe_used."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "no-probe.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-probe-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "exec_probe_used" not in vio_ids
+
+
+class TestInsecureVolumeType:
+    """Tests for insecure volume type detection."""
+
+    def test_nfs_volume(self, tmp_path):
+        """Pod with NFS volume should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "nfs-vol.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    nfs:
+      server: nfs-server.example.com
+      path: /exports/data
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "insecure_volume_type" in vio_ids
+
+    def test_iscsi_volume(self, tmp_path):
+        """Pod with iSCSI volume should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "iscsi-vol.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: iscsi-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    iscsi:
+      targetPortal: 10.0.0.1:3260
+      iqn: iqn.2001-04.com.example:storage
+      lun: 0
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "insecure_volume_type" in vio_ids
+
+    def test_flexvolume(self, tmp_path):
+        """Pod with flexVolume should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "flex-vol.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: flex-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    flexVolume:
+      driver: example.com/driver
+      options:
+        key: value
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "insecure_volume_type" in vio_ids
+
+    def test_emptydir_not_flagged(self, tmp_path):
+        """Pod with emptyDir volume should not trigger insecure_volume_type."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "emptydir-vol.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: emptydir-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    volumeMounts:
+    - name: cache
+      mountPath: /cache
+  volumes:
+  - name: cache
+    emptyDir: {}
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "insecure_volume_type" not in vio_ids
+
+
+class TestDaemonSetDetection:
+    """Tests for DaemonSet-specific risk detection."""
+
+    def test_daemonset_detected(self, tmp_path):
+        """DaemonSet should trigger daemonset_detected info."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "ds-detect.yaml",
+            """\
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      containers:
+      - name: exporter
+        image: prom/node-exporter:v1.7.0
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "daemonset_detected" in vio_ids
+
+    def test_deployment_not_flagged_as_daemonset(self, tmp_path):
+        """Deployment should not trigger daemonset_detected."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "deploy.yaml",
+            """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.25
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "daemonset_detected" not in vio_ids
+
+
+class TestCronJobNoHistory:
+    """Tests for CronJob history limit detection."""
+
+    def test_cronjob_success_limit_zero(self, tmp_path):
+        """CronJob with successfulJobsHistoryLimit=0 should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "cron-nohist.yaml",
+            """\
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-nohist
+spec:
+  schedule: "0 * * * *"
+  successfulJobsHistoryLimit: 0
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleaner
+            image: busybox:1.36
+            command: ["sh", "-c", "echo cleanup"]
+          restartPolicy: OnFailure
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "cronjob_no_history" in vio_ids
+
+    def test_cronjob_failed_limit_zero(self, tmp_path):
+        """CronJob with failedJobsHistoryLimit=0 should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "cron-nofail.yaml",
+            """\
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-nofail
+spec:
+  schedule: "0 * * * *"
+  failedJobsHistoryLimit: 0
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleaner
+            image: busybox:1.36
+            command: ["sh", "-c", "echo cleanup"]
+          restartPolicy: OnFailure
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "cronjob_no_history" in vio_ids
+
+    def test_cronjob_default_limits_not_flagged(self, tmp_path):
+        """CronJob without explicit limit (default) should not trigger."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "cron-default.yaml",
+            """\
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-default
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleaner
+            image: busybox:1.36
+            command: ["sh", "-c", "echo cleanup"]
+          restartPolicy: OnFailure
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "cronjob_no_history" not in vio_ids
+
+    def test_deployment_not_flagged_as_cronjob(self, tmp_path):
+        """Deployment should not trigger cronjob_no_history."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "deploy-nocron.yaml",
+            """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.25
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        vio_ids = [v["id"] for r in result["results"] for v in r["violations"]]
+        assert "cronjob_no_history" not in vio_ids
+
+
+class TestK3sKubeconfigPermissions:
+    """Tests for K3s kubeconfig permission checks."""
+
+    def test_k3s_kubeconfig_world_readable(self, tmp_path):
+        """K3s kubeconfig with group/other read should trigger alert."""
+        import os
+        import stat
+
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        kc_path = root / "etc" / "rancher" / "k3s" / "k3s.yaml"
+        kc_path.write_text("apiVersion: v1\nclusters: []\n", encoding="utf-8")
+        os.chmod(str(kc_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_kubeconfig_world_readable" in vio_ids
+
+    def test_k3s_kubeconfig_owner_only_clean(self, tmp_path):
+        """K3s kubeconfig with 0600 should not trigger."""
+        import os
+        import stat
+
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        kc_path = root / "etc" / "rancher" / "k3s" / "k3s.yaml"
+        kc_path.write_text("apiVersion: v1\nclusters: []\n", encoding="utf-8")
+        os.chmod(str(kc_path), stat.S_IRUSR | stat.S_IWUSR)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_kubeconfig_world_readable" not in vio_ids
+
+    def test_k3s_kubeconfig_missing_not_flagged(self, tmp_path):
+        """Missing kubeconfig should not trigger."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_kubeconfig_world_readable" not in vio_ids
+
+
+class TestK3sDatastoreNoTLS:
+    """Tests for K3s datastore endpoint TLS check."""
+
+    def test_datastore_http_triggers(self, tmp_path):
+        """datastore-endpoint with http:// should trigger alert."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+datastore-endpoint: "http://etcd.example.com:2379"
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_datastore_no_tls" in vio_ids
+
+    def test_datastore_https_clean(self, tmp_path):
+        """datastore-endpoint with https:// should not trigger."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+datastore-endpoint: "https://etcd.example.com:2379"
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_datastore_no_tls" not in vio_ids
+
+    def test_no_datastore_not_flagged(self, tmp_path):
+        """No datastore-endpoint should not trigger."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_datastore_no_tls" not in vio_ids
+
+
+class TestK3sStaticToken:
+    """Tests for K3s static bootstrap token detection."""
+
+    def test_static_token_triggers(self, tmp_path):
+        """config.yaml with token but no token-file should trigger warning."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+token: "mysecrettoken123"
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_static_token" in vio_ids
+
+    def test_token_file_clean(self, tmp_path):
+        """config.yaml with both token and token-file should not trigger."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+token: "mysecrettoken123"
+token-file: "/etc/rancher/k3s/token-file"
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_static_token" not in vio_ids
+
+    def test_no_token_not_flagged(self, tmp_path):
+        """config.yaml without token key should not trigger."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        node = [r for r in result["results"] if r["kind"] == "NodeConfig"]
+        assert len(node) == 1
+        vio_ids = [v["id"] for v in node[0]["violations"]]
+        assert "k3s_static_token" not in vio_ids
+
+
+class TestApiserverAuditRetention:
+    """Tests for API server audit log retention detection."""
+
+    def test_audit_enabled_no_retention(self, tmp_path):
+        """API server with audit-log-path but no retention flags."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "kube-apiserver.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-apiserver
+spec:
+  containers:
+  - name: kube-apiserver
+    image: registry.k8s.io/kube-apiserver:v1.29.0
+    command:
+    - kube-apiserver
+    - --anonymous-auth=false
+    - --insecure-port=0
+    - --authorization-mode=Node,RBAC
+    - --encryption-provider-config=/etc/kubernetes/enc.yaml
+    - --enable-admission-plugins=NodeRestriction,PodSecurity
+    - --audit-log-path=/var/log/kubernetes/audit.log
+    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        apiserver = [r for r in cp if r["resource"] == "kube-apiserver"]
+        assert len(apiserver) == 1
+        vio_ids = [v["id"] for v in apiserver[0]["violations"]]
+        assert "apiserver_audit_retention_missing" in vio_ids
+
+    def test_audit_enabled_with_retention_clean(self, tmp_path):
+        """API server with audit logging and retention should not trigger."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "kube-apiserver.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-apiserver
+spec:
+  containers:
+  - name: kube-apiserver
+    image: registry.k8s.io/kube-apiserver:v1.29.0
+    command:
+    - kube-apiserver
+    - --anonymous-auth=false
+    - --insecure-port=0
+    - --authorization-mode=Node,RBAC
+    - --encryption-provider-config=/etc/kubernetes/enc.yaml
+    - --enable-admission-plugins=NodeRestriction,PodSecurity
+    - --audit-log-path=/var/log/kubernetes/audit.log
+    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+    - --audit-log-maxage=30
+    - --audit-log-maxbackup=10
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        apiserver = [r for r in cp if r["resource"] == "kube-apiserver"]
+        assert len(apiserver) == 1
+        vio_ids = [v["id"] for v in apiserver[0]["violations"]]
+        assert "apiserver_audit_retention_missing" not in vio_ids
+
+    def test_audit_disabled_no_retention_not_flagged(self, tmp_path):
+        """API server without audit-log-path should not trigger retention."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "kube-apiserver.yaml",
+            """\
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-apiserver
+spec:
+  containers:
+  - name: kube-apiserver
+    image: registry.k8s.io/kube-apiserver:v1.29.0
+    command:
+    - kube-apiserver
+    - --anonymous-auth=false
+    - --insecure-port=0
+    - --authorization-mode=Node,RBAC
+    - --encryption-provider-config=/etc/kubernetes/enc.yaml
+    - --enable-admission-plugins=NodeRestriction,PodSecurity
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        apiserver = [r for r in cp if r["resource"] == "kube-apiserver"]
+        assert len(apiserver) == 1
+        vio_ids = [v["id"] for v in apiserver[0]["violations"]]
+        assert "apiserver_audit_retention_missing" not in vio_ids
+
+    def test_k3s_audit_retention_missing(self, tmp_path):
+        """K3s config with audit-log-path but no retention should trigger."""
+        root = _make_rootfs(tmp_path)
+        (root / "etc" / "rancher" / "k3s").mkdir(parents=True)
+        _write_yaml(
+            root / "etc" / "rancher" / "k3s" / "config.yaml",
+            """\
+kube-apiserver-arg:
+  - "anonymous-auth=false"
+  - "authorization-mode=Node,RBAC"
+  - "audit-log-path=/var/log/kubernetes/audit.log"
+  - "audit-policy-file=/etc/kubernetes/audit-policy.yaml"
+kubelet-arg:
+  - "anonymous-auth=false"
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        cp = [r for r in result["results"] if r["kind"] == "ControlPlane"]
+        k3s_api = [r for r in cp if r["resource"] == "k3s-apiserver"]
+        assert len(k3s_api) == 1
+        vio_ids = [v["id"] for v in k3s_api[0]["violations"]]
+        assert "apiserver_audit_retention_missing" in vio_ids

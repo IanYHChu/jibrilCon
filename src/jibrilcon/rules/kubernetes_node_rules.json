@@ -227,6 +227,67 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "k3s_kubeconfig_world_readable",
+      "type": "alert",
+      "severity": 8.0,
+      "description": "K3s kubeconfig file is readable by non-root users",
+      "risk": "The kubeconfig contains cluster admin credentials. World-readable permissions allow any user on the node to gain full cluster admin access.",
+      "remediation": "Set kubeconfig file permissions to 0600 (owner read/write only). Use --write-kubeconfig-mode=0600 in K3s config.",
+      "references": {
+        "mitre_attack": ["T1552.001"],
+        "cis_kubernetes_benchmark": ["4.1.1"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "k3s_kubeconfig_world_readable",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "k3s_datastore_no_tls",
+      "type": "alert",
+      "severity": 7.5,
+      "description": "K3s/RKE2 datastore endpoint uses unencrypted HTTP",
+      "risk": "An unencrypted datastore connection exposes all cluster state (secrets, RBAC, pod specs) to network eavesdropping and man-in-the-middle attacks.",
+      "remediation": "Use https:// for the datastore endpoint and configure datastore-cafile, datastore-certfile, datastore-keyfile.",
+      "references": {
+        "mitre_attack": ["T1557"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "datastore_no_tls",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "k3s_static_token",
+      "type": "warning",
+      "severity": 5.0,
+      "description": "K3s/RKE2 uses a static bootstrap token instead of a token file",
+      "risk": "Static tokens embedded in config.yaml cannot be rotated without restarting the cluster. If compromised, an attacker can join arbitrary nodes to the cluster.",
+      "remediation": "Use --token-file pointing to a file that can be rotated, instead of a static --token value.",
+      "references": {
+        "mitre_attack": ["T1078"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "static_token_no_rotation",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }

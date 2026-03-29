@@ -544,6 +544,86 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": "exec_probe_used",
+      "type": "info",
+      "severity": 3.0,
+      "description": "Container uses exec probe for liveness, readiness, or startup check",
+      "risk": "Exec probes run arbitrary commands inside the container. If the container is compromised, the probe command may be tampered with. In privileged containers, exec probes execute with elevated privileges.",
+      "remediation": "Prefer httpGet or tcpSocket probes over exec probes where possible.",
+      "references": {
+        "mitre_attack": ["T1609"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_exec_probe",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "insecure_volume_type",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "Pod uses network volume types with implicit security risks (NFS, iSCSI, flexVolume, etc.)",
+      "risk": "NFS lacks built-in authentication and is unencrypted. iSCSI is vulnerable to man-in-the-middle. flexVolume runs arbitrary host plugins. These volume types may expose data in transit.",
+      "remediation": "Use encrypted storage backends or CSI drivers with TLS. Avoid flexVolume (deprecated in favor of CSI).",
+      "references": {
+        "mitre_attack": ["T1040"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "has_insecure_volume_type",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "daemonset_detected",
+      "type": "info",
+      "severity": 3.0,
+      "description": "DaemonSet deploys pods to all (or selected) nodes in the cluster",
+      "risk": "DaemonSets run on every node, amplifying the blast radius of any security misconfiguration. A vulnerable DaemonSet container is exploitable on every node simultaneously.",
+      "remediation": "Apply strict security context (non-root, drop ALL caps, read-only rootfs) to DaemonSet pods. Use nodeSelector to limit deployment scope.",
+      "references": {
+        "mitre_attack": ["T1610"],
+        "nist_800_190": ["4.4"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "is_daemonset",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "cronjob_no_history",
+      "type": "warning",
+      "severity": 4.0,
+      "description": "CronJob has history limit set to 0 (audit trail loss)",
+      "risk": "Setting successfulJobsHistoryLimit or failedJobsHistoryLimit to 0 prevents reviewing past job executions, hiding evidence of compromised or failed runs.",
+      "remediation": "Set history limits to at least 1 (default: 3 successful, 1 failed).",
+      "references": {
+        "mitre_attack": ["T1562.002"],
+        "nist_800_190": ["4.5"]
+      },
+      "logic": "and",
+      "conditions": [
+        {
+          "field": "cronjob_no_history",
+          "operator": "equals",
+          "value": true
+        }
+      ]
     }
   ]
 }
