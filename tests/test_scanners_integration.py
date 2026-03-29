@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from jibrilcon.scanners import docker_native, lxc, podman
-from tests.conftest import _make_context
+from tests.conftest import _make_context, _write_text
 
 # ------------------------------------------------------------------ #
 # Docker scanner
@@ -1263,6 +1263,179 @@ class TestDockerScanner:
         result = docker_native.scan(r.path, context=ctx)
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "selinux_privileged" in vio_ids
+
+    def test_mounts_field_writable_bind(self, make_rootfs):
+        """Docker --mount type=bind without ReadOnly triggers binds_not_readonly."""
+        r = make_rootfs
+        cid = "mnt1" * 8 + "0" * 32
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/mnttest"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "LogConfig": {"Type": "json-file"},
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": "/data",
+                        "Target": "/mnt",
+                        "ReadOnly": False,
+                    }
+                ],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "binds_not_readonly" in vio_ids
+
+    def test_mounts_field_dangerous_source(self, make_rootfs):
+        """Docker --mount with dangerous source path triggers dangerous_bind_path."""
+        r = make_rootfs
+        cid = "mnt2" * 8 + "0" * 32
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/mntdanger"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "LogConfig": {"Type": "json-file"},
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": "/proc",
+                        "Target": "/host-proc",
+                        "ReadOnly": True,
+                    }
+                ],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "dangerous_bind_path" in vio_ids
+
+    def test_mounts_field_socket_writable(self, make_rootfs):
+        """Docker --mount for docker.sock without ReadOnly triggers socket_mount_writable."""
+        r = make_rootfs
+        cid = "mnt3" * 8 + "0" * 32
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/mntsock"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "LogConfig": {"Type": "json-file"},
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": "/var/run/docker.sock",
+                        "Target": "/var/run/docker.sock",
+                        "ReadOnly": False,
+                    }
+                ],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "socket_mount_writable" in vio_ids
+
+    def test_mounts_field_shared_propagation(self, make_rootfs):
+        """Docker --mount with shared propagation triggers mount_propagation_shared."""
+        r = make_rootfs
+        cid = "mnt4" * 8 + "0" * 32
+        r.add_docker_container(
+            cid,
+            config_v2={"Name": "/mntshared"},
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "LogConfig": {"Type": "json-file"},
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": "/data",
+                        "Target": "/mnt",
+                        "ReadOnly": True,
+                        "BindOptions": {"Propagation": "shared"},
+                    }
+                ],
+            },
+        )
+        ctx = _make_context()
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "mount_propagation_shared" in vio_ids
+
+    def test_mounts_field_readonly_clean(self, make_rootfs):
+        """Docker --mount with ReadOnly=True should not trigger binds_not_readonly."""
+        r = make_rootfs
+        r.add_docker_daemon_json({"userns-remap": "default", "icc": False})
+        cid = "mnt5" * 8 + "0" * 32
+        r.add_docker_container(
+            cid,
+            config_v2={
+                "Name": "/mntclean",
+                "Config": {"User": "appuser", "Image": "myapp:v1.0"},
+            },
+            hostconfig={
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "Binds": [],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "Memory": 536870912,
+                "PidsLimit": 100,
+                "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 3},
+                "LogConfig": {"Type": "json-file"},
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": "/data",
+                        "Target": "/mnt",
+                        "ReadOnly": True,
+                    }
+                ],
+            },
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("docker", "mntclean")
+        ctx.set_service_meta(
+            "docker",
+            "mntclean",
+            {
+                "user": "dockeruser",
+                "unit": "docker-mntclean.service",
+                "path": "etc/systemd/system/docker-mntclean.service",
+                "cap_bounding_set": "CAP_NET_BIND_SERVICE",
+                "ambient_capabilities": "",
+            },
+        )
+        result = docker_native.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "binds_not_readonly" not in vio_ids
 
 
 # ------------------------------------------------------------------ #
@@ -2589,6 +2762,79 @@ class TestPodmanScanner:
         vio_ids = [v["id"] for v in result["results"][0]["violations"]]
         assert "containers_conf_no_seccomp" in vio_ids
 
+    def test_inline_seccomp_not_flagged(self, make_rootfs):
+        """Inline linux.seccomp object should satisfy seccomp check."""
+        r = make_rootfs
+        cid = "sec1" * 8 + "0" * 32
+        r.add_podman_container(
+            cid,
+            "seccomp_inline",
+            {
+                "root": {"path": "rootfs", "readonly": True},
+                "process": {
+                    "user": {"uid": 1000},
+                    "noNewPrivileges": True,
+                    "capabilities": {
+                        "bounding": ["CAP_NET_BIND_SERVICE"],
+                        "effective": ["CAP_NET_BIND_SERVICE"],
+                    },
+                },
+                "mounts": [],
+                "linux": {
+                    "seccomp": {
+                        "defaultAction": "SCMP_ACT_ERRNO",
+                        "syscalls": [],
+                    },
+                    "maskedPaths": [
+                        "/proc/kcore",
+                        "/proc/sysrq-trigger",
+                        "/proc/mem",
+                        "/proc/kmsg",
+                    ],
+                    "readonlyPaths": [
+                        "/proc/sys",
+                        "/proc/irq",
+                        "/proc/bus",
+                        "/sys/firmware",
+                    ],
+                    "namespaces": [
+                        {"type": "pid"},
+                        {"type": "network"},
+                        {"type": "ipc"},
+                    ],
+                    "resources": {
+                        "memory": {"limit": 536870912},
+                        "pids": {"limit": 100},
+                    },
+                },
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "seccomp_disabled" not in vio_ids
+
+    def test_no_seccomp_at_all_flagged(self, make_rootfs):
+        """Missing both seccompProfilePath and seccomp should trigger seccomp_disabled."""
+        r = make_rootfs
+        cid = "sec2" * 8 + "0" * 32
+        r.add_podman_container(
+            cid,
+            "no_seccomp",
+            {
+                "process": {
+                    "user": {"uid": 1000},
+                    "capabilities": {"bounding": []},
+                },
+                "mounts": [],
+                "linux": {},
+            },
+        )
+        ctx = _make_context()
+        result = podman.scan(r.path, context=ctx)
+        vio_ids = [v["id"] for v in result["results"][0]["violations"]]
+        assert "seccomp_disabled" in vio_ids
+
 
 # ------------------------------------------------------------------ #
 # LXC scanner
@@ -3783,6 +4029,75 @@ class TestLxcScanner:
         ][0]
         assert vio["type"] == "warning"
         assert vio["severity"] == 6.0
+
+    def test_lxc_include_merges_config(self, make_rootfs):
+        """lxc.include directives should be followed and merged into config."""
+        from pathlib import Path
+
+        r = make_rootfs
+        # Write the included common config with cap.drop and seccomp
+        _write_text(
+            Path(r.path) / "usr" / "share" / "lxc" / "config" / "common.conf",
+            (
+                "lxc.cap.drop = sys_admin mac_admin mac_override\n"
+                "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp\n"
+            ),
+        )
+        # Main config uses lxc.include to load the common file
+        r.add_lxc_config(
+            "inctest",
+            (
+                "lxc.rootfs.path = /var/lib/lxc/inctest/rootfs\n"
+                "lxc.include = /usr/share/lxc/config/common.conf\n"
+                "lxc.idmap = u 0 100000 65536\n"
+                "lxc.idmap = g 0 100000 65536\n"
+                "lxc.net.0.type = veth\n"
+                "lxc.no_new_privs = 1\n"
+                "lxc.cgroup.memory.limit_in_bytes = 536870912\n"
+                "lxc.prlimit.nproc = 1024\n"
+                "lxc.rootfs.options = ro\n"
+            ),
+        )
+        ctx = _make_context()
+        ctx.mark_systemd_started("lxc", "inctest")
+        ctx.set_service_meta(
+            "lxc",
+            "inctest",
+            {
+                "user": "lxcuser",
+                "unit": "lxc-inctest.service",
+                "path": "etc/systemd/system/lxc-inctest.service",
+                "cap_bounding_set": "CAP_NET_ADMIN",
+                "ambient_capabilities": "",
+            },
+        )
+        result = lxc.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        # cap.drop and seccomp come from included file -- should NOT be flagged
+        assert "cap_drop_missing" not in vio_ids
+        assert "seccomp_profile_missing" not in vio_ids
+
+    def test_lxc_include_missing_triggers_violations(self, make_rootfs):
+        """Without lxc.include, missing cap.drop and seccomp should be flagged."""
+        r = make_rootfs
+        r.add_lxc_config(
+            "noinc",
+            (
+                "lxc.rootfs.path = /var/lib/lxc/noinc/rootfs\n"
+                "lxc.idmap = u 0 100000 65536\n"
+                "lxc.idmap = g 0 100000 65536\n"
+                "lxc.net.0.type = veth\n"
+            ),
+        )
+        ctx = _make_context()
+        result = lxc.scan(r.path, context=ctx)
+        containers = result["results"]
+        assert len(containers) == 1
+        vio_ids = [v["id"] for v in containers[0]["violations"]]
+        assert "cap_drop_missing" in vio_ids
+        assert "seccomp_profile_missing" in vio_ids
 
 
 # ------------------------------------------------------------------ #

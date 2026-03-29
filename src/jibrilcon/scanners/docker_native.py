@@ -253,6 +253,18 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
 
     binds_not_readonly = any(_bind_is_writable(b) for b in binds)
 
+    # Docker --mount syntax stores structured objects in HostConfig.Mounts
+    mounts = host.get("Mounts") or []
+    if not isinstance(mounts, list):
+        logger.warning("Mounts is not a list, ignoring: %s", type(mounts).__name__)
+        mounts = []
+    mounts = [m for m in mounts if isinstance(m, dict) and m.get("Type") == "bind"]
+
+    if not binds_not_readonly:
+        binds_not_readonly = any(
+            not m.get("ReadOnly", False) for m in mounts
+        )
+
     seccomp_disabled = any(str(o).startswith("seccomp=unconfined") for o in sec_opts)
 
     # Host namespace sharing
@@ -278,7 +290,9 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     def _bind_src(b: str) -> str:
         return str(b).split(":")[0]
 
-    dangerous_bind_path = any(_bind_src(b) in _DANGEROUS_BIND_PATHS for b in binds)
+    dangerous_bind_path = any(
+        _bind_src(b) in _DANGEROUS_BIND_PATHS for b in binds
+    ) or any(m.get("Source", "") in _DANGEROUS_BIND_PATHS for m in mounts)
 
     # --- no-new-privileges ---
     no_new_privileges_missing = not any(
@@ -296,7 +310,13 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         opts = parts[2].split(",")
         return "shared" in opts or "rshared" in opts
 
-    mount_propagation_shared = any(_has_shared_propagation(b) for b in binds)
+    mount_propagation_shared = any(
+        _has_shared_propagation(b) for b in binds
+    ) or any(
+        isinstance(m.get("BindOptions"), dict)
+        and m["BindOptions"].get("Propagation") in ("shared", "rshared")
+        for m in mounts
+    )
 
     # --- Image tag :latest or missing ---
     image = cfg.get("Config", {}).get("Image", "") or cfg.get("Image", "")
@@ -374,7 +394,16 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
             return True  # no options = default rw
         return "ro" not in parts[2].split(",")
 
-    socket_mount_writable = any(_socket_writable(b) for b in binds)
+    _SOCKET_PATHS_SET = {
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "/run/containerd/containerd.sock",
+        "/var/run/crio/crio.sock",
+    }
+    socket_mount_writable = any(_socket_writable(b) for b in binds) or any(
+        m.get("Source", "") in _SOCKET_PATHS_SET and not m.get("ReadOnly", False)
+        for m in mounts
+    )
 
     # ExtraHosts -- custom /etc/hosts entries
     extra_hosts = host.get("ExtraHosts") or []

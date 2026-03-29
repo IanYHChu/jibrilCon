@@ -1424,16 +1424,22 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
                 elif kind == "NetworkPolicy":
                     data = _extract_netpol_fields(doc)
                     # Track default-deny: empty podSelector + no
-                    # ingress/egress rules = deny-all
+                    # ingress/egress rules + policyTypes covers both
+                    # directions.  Per K8s spec, omitting policyTypes
+                    # defaults to ["Ingress"] only -- egress remains
+                    # unrestricted, so that is NOT a full deny-all.
                     spec = doc.get("spec") or {}
                     selector = spec.get("podSelector") or {}
                     ingress = spec.get("ingress")
                     egress = spec.get("egress")
+                    policy_types = set(spec.get("policyTypes") or ["Ingress"])
                     is_deny_all = (
                         not selector.get("matchLabels")
                         and not selector.get("matchExpressions")
                         and ingress is None
                         and egress is None
+                        and "Ingress" in policy_types
+                        and "Egress" in policy_types
                     )
                     if is_deny_all:
                         ns = (doc.get("metadata") or {}).get("namespace", "default")

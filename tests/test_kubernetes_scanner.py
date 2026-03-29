@@ -4293,3 +4293,90 @@ spec:
         vio_ids = [v["id"] for v in iso[0]["violations"]]
         assert "namespace_quota_missing" not in vio_ids
         assert "namespace_default_deny_missing" in vio_ids
+
+    def test_ingress_only_netpol_not_full_deny(self, tmp_path):
+        """NetworkPolicy with only Ingress policyType is NOT a full deny-all."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "ingress-only.yaml",
+            """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: partial-deny-ns
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota
+  namespace: partial-deny-ns
+spec:
+  hard:
+    pods: "10"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-deny
+  namespace: partial-deny-ns
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        iso = [
+            r
+            for r in result["results"]
+            if r["kind"] == "Namespace" and r["status"] == "violated"
+        ]
+        assert len(iso) == 1
+        vio_ids = [v["id"] for v in iso[0]["violations"]]
+        # Ingress-only deny is NOT full deny-all, so this should fire
+        assert "namespace_default_deny_missing" in vio_ids
+
+    def test_no_policy_types_defaults_ingress_only(self, tmp_path):
+        """Missing policyTypes defaults to Ingress only -- not full deny-all."""
+        root = _make_rootfs(tmp_path)
+        _write_yaml(
+            root / "etc" / "kubernetes" / "manifests" / "no-pt.yaml",
+            """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default-pt-ns
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota
+  namespace: default-pt-ns
+spec:
+  hard:
+    pods: "10"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: empty-deny
+  namespace: default-pt-ns
+spec:
+  podSelector: {}
+""",
+        )
+        ctx = _make_context()
+        result = kubernetes.scan(str(root), context=ctx)
+        iso = [
+            r
+            for r in result["results"]
+            if r["kind"] == "Namespace" and r["status"] == "violated"
+        ]
+        assert len(iso) == 1
+        vio_ids = [v["id"] for v in iso[0]["violations"]]
+        assert "namespace_default_deny_missing" in vio_ids

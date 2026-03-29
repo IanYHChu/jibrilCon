@@ -221,14 +221,30 @@ def _filter_active_lxc_configs(configs: set[Path], rootfs: str) -> set[Path]:
     return used or configs
 
 
-def _parse_lxc_config(path: Path) -> dict[str, list[str]]:
-    """Parse key = value lines into mapping key -> list[str]."""
+def _parse_lxc_config(
+    path: Path,
+    rootfs: str | None = None,
+    *,
+    _visited: set[Path] | None = None,
+    _depth: int = 0,
+) -> dict[str, list[str]]:
+    """Parse key = value lines into mapping key -> list[str].
+
+    When *rootfs* is provided, ``lxc.include`` directives are followed
+    recursively (bounded by ``_MAX_INCLUDE_DEPTH`` and a *_visited* set
+    to prevent circular includes).
+    """
     result: dict[str, list[str]] = {}
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError as exc:
         logger.warning("Cannot read LXC config %s: %s", path, exc)
         return result
+
+    if _visited is None:
+        _visited = set()
+    _visited.add(path)
+
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -236,6 +252,27 @@ def _parse_lxc_config(path: Path) -> dict[str, list[str]]:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
+
+        # Follow lxc.include directives
+        if key == "lxc.include" and rootfs and _depth < _MAX_INCLUDE_DEPTH:
+            try:
+                if os.path.isabs(value):
+                    inc_path = safe_join(rootfs, value.lstrip("/"))
+                else:
+                    rel = os.path.relpath(path.parent / value, rootfs)
+                    inc_path = safe_join(rootfs, rel)
+            except ValueError:
+                continue  # include path escapes rootfs, skip
+            if inc_path in _visited:
+                continue  # circular include
+            if inc_path.is_file():
+                inc_entries = _parse_lxc_config(
+                    inc_path, rootfs, _visited=_visited, _depth=_depth + 1
+                )
+                for k, vals in inc_entries.items():
+                    result.setdefault(k, []).extend(vals)
+            continue
+
         result.setdefault(key, []).append(value)
     return result
 
@@ -732,7 +769,7 @@ def _prepare_entries(
     Returns the fully merged config entries dict.
     """
     # 1) load default config
-    entries = _parse_lxc_config(cfg_path)
+    entries = _parse_lxc_config(cfg_path, mount_path)
 
     # 2) acquire Exec* command lines
     exec_lines = context.get_exec_lines("lxc", container_name)
@@ -749,7 +786,7 @@ def _prepare_entries(
         except ValueError:
             rc_abs = None
         if rc_abs and rc_abs.is_file():
-            rc_entries = _parse_lxc_config(rc_abs)
+            rc_entries = _parse_lxc_config(rc_abs, mount_path)
             entries = _merge_entries(entries, rc_entries)
 
     # apply -s/--define overrides (highest priority)

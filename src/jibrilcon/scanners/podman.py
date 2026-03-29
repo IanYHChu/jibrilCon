@@ -270,7 +270,8 @@ def _extract_fields(cfg: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(caps_permitted, list):
         caps_permitted = []
 
-    seccomp_present = "seccompProfilePath" in cfg.get("linux", {})
+    linux_section = cfg.get("linux", {})
+    seccomp_present = "seccompProfilePath" in linux_section or "seccomp" in linux_section
 
     binds_not_readonly = any(
         isinstance(m, dict)
