@@ -33,8 +33,8 @@ def threadsafe_lru_cache(maxsize: int = 128):
             with lock:
                 return cached(*args, **kwargs)
 
-        wrapper.cache_clear = cached.cache_clear
-        wrapper.cache_info = cached.cache_info
+        wrapper.cache_clear = cached.cache_clear  # type: ignore[attr-defined]
+        wrapper.cache_info = cached.cache_info  # type: ignore[attr-defined]
         return wrapper
 
     return decorator
