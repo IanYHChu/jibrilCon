@@ -1738,7 +1738,7 @@ def scan(mount_path: str, context: ScanContext | None = None) -> dict[str, Any]:
     # Skip system namespaces that don't need ResourceQuota/NetworkPolicy
     _SYSTEM_NS = {"kube-system", "kube-public", "kube-node-lease"}
     for ns_name in sorted(namespaces_seen - _SYSTEM_NS):
-        vios: list[dict[str, Any]] = []
+        vios = []
         source = namespace_source.get(ns_name, "<unknown>")
 
         if ns_name not in namespaces_with_quota:
