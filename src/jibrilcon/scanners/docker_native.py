@@ -261,9 +261,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
     mounts = [m for m in mounts if isinstance(m, dict) and m.get("Type") == "bind"]
 
     if not binds_not_readonly:
-        binds_not_readonly = any(
-            not m.get("ReadOnly", False) for m in mounts
-        )
+        binds_not_readonly = any(not m.get("ReadOnly", False) for m in mounts)
 
     seccomp_disabled = any(str(o).startswith("seccomp=unconfined") for o in sec_opts)
 
@@ -310,9 +308,7 @@ def _extract_fields(cfg: dict[str, Any], host: dict[str, Any]) -> dict[str, Any]
         opts = parts[2].split(",")
         return "shared" in opts or "rshared" in opts
 
-    mount_propagation_shared = any(
-        _has_shared_propagation(b) for b in binds
-    ) or any(
+    mount_propagation_shared = any(_has_shared_propagation(b) for b in binds) or any(
         isinstance(m.get("BindOptions"), dict)
         and m["BindOptions"].get("Propagation") in ("shared", "rshared")
         for m in mounts
