@@ -998,13 +998,13 @@ def _check_k3s_token_permissions(rootfs: str) -> dict[str, Any]:
     """Check if K3s token file has overly permissive permissions."""
     token_path = os.path.join(rootfs, "var/lib/rancher/k3s/server/token")
     if not os.path.isfile(token_path):
-        return {"k3s_token_world_readable": False}
+        return {"k3s_token_world_readable": False}  # nosec B105
     try:
         mode = os.stat(token_path).st_mode
         world_readable = bool(mode & 0o044)  # group or other readable
         return {"k3s_token_world_readable": world_readable}
     except OSError:
-        return {"k3s_token_world_readable": False}
+        return {"k3s_token_world_readable": False}  # nosec B105
 
 
 def _check_k3s_kubeconfig_permissions(rootfs: str) -> dict[str, Any]:
